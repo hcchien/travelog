@@ -1,0 +1,25 @@
+{
+  "name": "travelog",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:generate": "pnpm --filter @travelog/db generate",
+    "db:migrate": "pnpm --filter @travelog/db migrate",
+    "e2e": "node e2e/smoke.mjs",
+    "sandbox": "pnpm --filter @travelog/api sandbox"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "turbo": "^2.11.13",
+    "typescript": "~5.9.3",
+    "playwright": "^1.65.1"
+  }
+}
