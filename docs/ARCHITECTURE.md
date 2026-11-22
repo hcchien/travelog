@@ -4,6 +4,7 @@
 >
 > v0.2 變更：身分提供者加入 Apple；移除照片處理管線（保留附件上傳），相關設計移到 §14 未來擴充。
 > v0.3 變更：加入 Passkey（WebAuthn）登入（§4.2.3）；新增確定（釘選）行程點的資料模型與伺服器端鎖定規則（§5.5）。
+> v0.7 變更：移除 App 內 AI（§8.2、相關資料表與技術決策）；MCP 端點改為內建於 `api`（`/mcp`），以內部權杖呼叫 API 路由，不轉送使用者權杖（§8）；新增 MCP 修改復原（§8.3）、快速筆記、即時同步（§6.3 改用 pg_notify）。
 > v0.6 變更：實作 M1／M2 與 Web 前端——地點代理與快取（§5.6）、想去清單、我的地點庫、成員與邀請 API；新增本機沙盒（§10.2）。尚未實作：邀請信寄送（目前以 Mailer 介面記錄）、Routes API 移動時間、即時同步。
 > v0.5 變更：API 實作同步——行程點列表與訂位新增端點、測試環境（§7、§10.2）。
 > v0.4 變更：新增我的地點庫（§5.6）；新增 App 內 AI 行程助理（§8.2），與 MCP 共用工具定義（`packages/tools`）；本機開發改用本機安裝的 PostgreSQL，不使用 Docker（§10.2）。
@@ -34,8 +35,7 @@ flowchart TB
     LB[Global HTTPS Load Balancer<br/>+ Cloud Armor + Cloud CDN]
     subgraph CR[Cloud Run]
       WEB[web<br/>Next.js SSR]
-      API[api<br/>Hono REST + Auth/OAuth]
-      MCP[mcp<br/>Remote MCP Server]
+      API[api<br/>Hono REST + OAuth<br/>+ MCP 端點 /mcp]
       WK[worker<br/>非同步任務]
     end
     SQL[(Cloud SQL<br/>PostgreSQL 16<br/>+ PostGIS + pg_trgm)]
@@ -54,9 +54,7 @@ flowchart TB
   AI --> LB
   LB --> WEB
   LB --> API
-  LB --> MCP
   WEB -->|server-side 呼叫| API
-  MCP -->|帶使用者 token 呼叫| API
   API --> SQL
   API -->|簽章網址| GCS
   API --> TQ --> WK
@@ -71,13 +69,13 @@ flowchart TB
 
 ### 2.1 服務切分
 
-| 服務     | 技術                                                          | 職責                                                                                                             |
-| -------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `web`    | Next.js（App Router）on Cloud Run                             | 網站 UI、公開遊記 SSR（SEO）、PWA                                                                                |
-| `api`    | Node.js + Hono + Drizzle ORM on Cloud Run                     | REST API、權限、Passkey / Google / Apple 登入、OAuth 2.1 授權伺服器（給 MCP）、附件上傳簽章、AI 行程助理（§8.2） |
-| `mcp`    | `@modelcontextprotocol/sdk`（Streamable HTTP）on Cloud Run    | 將 API 包成 MCP tools/resources，使用使用者的 access token 呼叫 `api`                                            |
-| `worker` | Node.js on Cloud Run（由 Cloud Tasks / Cloud Scheduler 觸發） | 邀請 Email、推播、匯出 PDF、清理過期邀請、刷新地點快取。MVP 若任務很少，可先併在 `api` 內，之後再拆出            |
-| `mobile` | Expo（React Native）                                          | iOS / Android App，Phase 3                                                                                       |
+| 服務      | 技術                                                          | 職責                                                                                                                       |
+| --------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `web`     | Next.js（App Router）on Cloud Run                             | 網站 UI、公開遊記 SSR（SEO）、PWA                                                                                          |
+| `api`     | Node.js + Hono + Drizzle ORM on Cloud Run                     | REST API、權限、Passkey / Google / Apple 登入、OAuth 2.1 授權伺服器、MCP 端點（`/mcp`，§8）、附件上傳簽章、即時同步（SSE） |
+| （`mcp`） | 內建於 `api`                                                  | 原規劃為獨立服務；為避免把使用者權杖轉送給另一個服務（MCP 規範禁止 token passthrough），改為 `api` 內的 `/mcp` 端點（§8）  |
+| `worker`  | Node.js on Cloud Run（由 Cloud Tasks / Cloud Scheduler 觸發） | 邀請 Email、推播、匯出 PDF、清理過期邀請、刷新地點快取。MVP 若任務很少，可先併在 `api` 內，之後再拆出                      |
+| `mobile`  | Expo（React Native）                                          | iOS / Android App，Phase 3                                                                                                 |
 
 > 為什麼 `api` 不直接用 Next.js API Routes？因為 App 和 MCP 也要用同一套 API，獨立服務的邊界比較清楚，也能獨立擴展與部署。Next.js 只負責呈現。
 
@@ -97,7 +95,7 @@ travelog/
 │   ├── schema/       # zod schema：API 輸入輸出、共用型別（單一真相來源）
 │   ├── db/           # Drizzle schema、migrations
 │   ├── domain/       # 純商業邏輯（權限判斷、時區、排序、確定行程點鎖定）
-│   ├── tools/        # 行程操作工具定義（名稱、說明、zod 輸入 schema、讀/寫分類），MCP 與 App 內 AI 共用
+│   ├── tools/        # MCP 工具定義（名稱、說明、zod 輸入 schema、所需 scope、呼叫的 API）；日後若加 App 內 AI 可共用
 │   ├── api-client/   # 由 OpenAPI 產生的型別安全 client（web / mobile / mcp 共用）
 │   └── ui/           # 共用 UI 元件（web 為主，部分可共用到 mobile）
 ├── infra/
@@ -166,7 +164,7 @@ travelog/
 ```mermaid
 sequenceDiagram
   participant C as MCP Client（Claude）
-  participant M as mcp 服務
+  participant M as api /mcp 端點
   participant A as api（授權伺服器）
   participant G as Google
   C->>M: 呼叫 MCP（無 token）
@@ -180,18 +178,18 @@ sequenceDiagram
   A-->>C: 使用者同意後回傳授權碼
   C->>A: /oauth/token 換 access/refresh token
   C->>M: 呼叫 MCP（Bearer token）
-  M->>A: 以該 token 呼叫 REST API
+  M->>A: 驗證 token 後，以內部權杖（channel=mcp、帶 scope）在同一程序內呼叫 API 路由
 ```
 
 > MCP 授權規範仍在演進（客戶端註冊方式從 DCR 走向 Client ID Metadata Documents），實作時以當下最新版規範為準，建議兩者都支援。
 
 ### 4.3 OAuth Scope
 
-| Scope           | 說明                        |
-| --------------- | --------------------------- |
-| `trips:read`    | 讀取使用者所屬的行程        |
-| `trips:write`   | 新增/修改行程點、地點、清單 |
-| `journal:write` | 新增心得、筆記              |
+| Scope           | 說明                         |
+| --------------- | ---------------------------- |
+| `trips:read`    | 讀取使用者所屬的行程         |
+| `trips:write`   | 新增/修改行程點、地點、清單  |
+| `journal:write` | 新增快速筆記（之後包含心得） |
 
 Web 與 App 的第一方 client 預設取得全部 scope；MCP client 由使用者在同意頁勾選。
 
@@ -219,8 +217,6 @@ erDiagram
   users ||--o{ webauthn_credentials : ""
   users ||--o{ saved_places : ""
   places ||--o{ saved_places : ""
-  trips ||--o{ ai_conversations : ""
-  ai_conversations ||--o{ ai_proposals : ""
   users ||--o{ trip_members : ""
   trips ||--o{ trip_members : ""
   trips ||--o{ invitations : ""
@@ -256,10 +252,6 @@ erDiagram
 | `bookings`                                          | id, item_id, kind (flight/lodging/rail/car/ticket/restaurant/other), status (planned/booked/cancelled), confirmation_code, provider, details jsonb                                                                    | 航班可有出發/抵達兩個時區；`status` 變為 `booked` 時自動確定行程點                                                |
 | `wishlist_items`                                    | id, trip_id, place_id, note, added_by, votes                                                                                                                                                                          |                                                                                                                   |
 | `saved_places`                                      | id, user_id, place_id, city_key, city_name, category (food/cafe/sight/shopping/stay/other), tags text[], private_note, created_at                                                                                     | unique (user_id, place_id)；見 §5.6                                                                               |
-| `ai_conversations`                                  | id, trip_id, user_id, scope (trip/day), day_id nullable, created_at                                                                                                                                                   | AI 助理對話，屬於行程                                                                                             |
-| `ai_messages`                                       | id, conversation_id, role, content jsonb, tokens_in, tokens_out, created_at                                                                                                                                           |                                                                                                                   |
-| `ai_proposals`                                      | id, conversation_id, ops jsonb, base_versions jsonb, status (pending/applied/partially_applied/discarded/stale), applied_by, applied_at                                                                               | 見 §8.2                                                                                                           |
-| `ai_usage`                                          | user_id, date, requests, tokens_in, tokens_out                                                                                                                                                                        | 每日額度                                                                                                          |
 | `attachments`                                       | id, trip_id, item_id nullable, gcs_key, filename, mime, size, offline (bool)                                                                                                                                          | 訂位憑證、PDF                                                                                                     |
 | `notes`                                             | id, trip_id, author_id, body text, taken_at, location geography nullable, day_id, item_id nullable, merged_into_entry_id nullable                                                                                     | 行中快速筆記                                                                                                      |
 | `journal_entries`                                   | id, trip_id, author_id, scope (trip/day/item), scope_id, body jsonb, body_text text, visibility (members/public), published_at, version                                                                               | body 用 Tiptap/ProseMirror JSON，schema 限定文字節點（不允許 image）；`body_text` 為純文字版本，供搜尋與 MCP 使用 |
@@ -341,12 +333,13 @@ sequenceDiagram
 - MVP：PostgreSQL `pg_trgm` 三元組索引，對中文、日文也能做到可用的子字串搜尋；搜尋範圍限定在使用者所屬的行程。
 - 進階（Phase 2+）：`pgvector` + Vertex AI embeddings，支援語意搜尋（如「那間有很多貓的咖啡廳」），MCP 的搜尋工具也能受益。
 
-### 6.3 即時同步（Phase 2）
+### 6.3 即時同步
 
-- `api` 在資料變更後發出事件（PostgreSQL `LISTEN/NOTIFY`）。
-- Client 以 Server-Sent Events 訂閱 `/trips/:id/events`，收到事件後重新抓取該筆資料（TanStack Query invalidate）。
-- Cloud Run 支援長連線（請求逾時上限 60 分鐘），client 需自動重連。
-- 若同時連線數成長，再改用 Memorystore（Redis）pub/sub 或 Firestore 作為推播通道。
+- 事件來源：`activity_log` 的 INSERT trigger 呼叫 `pg_notify('trip_events', {tripId, action, actorId, via, ...})`。所有寫入都會記活動紀錄，因此不會漏；NOTIFY 在交易 commit 後才送出，client 收到時資料一定已可讀。
+- 每個 `api` 執行個體 `LISTEN trip_events`，轉發給訂閱該行程的 SSE 連線；多個執行個體各自收到，不需要額外的訊息服務。
+- Client 以 `GET /v1/trips/:id/events`（SSE，帶 Bearer 權杖，用 fetch 串流讀取）訂閱，收到事件後讓對應的查詢失效重抓（TanStack Query invalidate）。每 25 秒送一次心跳。
+- Cloud Run 支援長連線（請求逾時上限 60 分鐘），client 斷線後自動重連。
+- 若同時連線數成長到單一資料庫連線不堪負荷，再改用 Memorystore（Redis）pub/sub。
 
 ### 6.4 離線（行中模式）
 
@@ -425,7 +418,7 @@ POST   /v1/trips/:tripId/ai/proposals/:id/apply  { opIds? }   POST .../discard
 GET    /v1/me/ai/usage
 
 POST   /v1/trips/:tripId/attachments/uploads   POST /v1/attachments/:id/complete
-GET/POST /v1/trips/:tripId/notes
+GET/POST /v1/trips/:tripId/notes   POST { body, takenAt?, lat?, lng?, itemId?, dayId? }（未指定 dayId 時依行程時區的日期歸到某天）
 GET/POST /v1/trips/:tripId/journal      PATCH /v1/trips/:tripId/journal/:entryId
 GET    /v1/trips/:tripId/search?q=
 GET    /v1/trips/:tripId/events      （SSE）
@@ -438,29 +431,31 @@ OAuth 授權伺服器端點（同在 `api`）：`/.well-known/oauth-authorizatio
 
 ## 8. MCP Server 設計
 
-- 傳輸：Streamable HTTP，端點 `https://mcp.<domain>/mcp`。
-- 無狀態：每次請求帶 Bearer token，`mcp` 服務本身不存資料，只轉呼叫 `api`（權限與稽核完全沿用 API）。
-- 提供 `/.well-known/oauth-protected-resource`，驗證 token 的 audience 必須是 `mcp` 資源。
+- 傳輸：Streamable HTTP（無狀態），端點 `https://api.<domain>/mcp`（也可用 `mcp.<domain>` 指向同一個服務）。
+- 內建於 `api`：`/mcp` 只接受 audience 為 MCP 資源（`<API_ORIGIN>/mcp`）的 access token；驗證後為該使用者簽發 30 秒的內部權杖（`cid=mcp`、帶授權的 scope），在同一個程序內呼叫 REST 路由。使用者的權杖不會被轉送，權限、驗證、活動紀錄（`via=mcp`）完全沿用 API。
+- Scope 雙重檢查：MCP 依工具宣告的 scope 先檢查；API 對 `cid=mcp` 的寫入請求再檢查一次。
+- 提供 `/.well-known/oauth-protected-resource`（以及 `/.well-known/oauth-protected-resource/mcp`）；未帶權杖時回 401 與 `WWW-Authenticate: Bearer resource_metadata="..."`。
+- 授權伺服器同時支援 Dynamic Client Registration（RFC 7591）與 Client ID Metadata Document（client_id 為 https URL）。
 
 ### 8.1 Tools
 
-| Tool                    | Scope         | 說明                                                                     |
-| ----------------------- | ------------- | ------------------------------------------------------------------------ |
-| `list_trips`            | trips:read    | 列出使用者的行程（可依狀態篩選）                                         |
-| `get_trip`              | trips:read    | 行程概要、成員、日期                                                     |
-| `get_day_plan`          | trips:read    | 某一天的行程點（含時間、地點、交通、是否已確定）                         |
-| `get_today`             | trips:read    | 進行中行程的今日行程與下一站                                             |
-| `search_trip`           | trips:read    | 在行程內全文/語意搜尋                                                    |
-| `get_bookings`          | trips:read    | 航班、住宿、票券資訊                                                     |
-| `search_places`         | trips:read    | 搜尋地點（透過 api 代理 Google Places）                                  |
-| `add_itinerary_item`    | trips:write   | 新增行程點                                                               |
-| `update_itinerary_item` | trips:write   | 修改時間、順序、備註                                                     |
-| `move_itinerary_item`   | trips:write   | 移到另一天/調整順序                                                      |
-| `add_to_wishlist`       | trips:write   | 加入想去清單                                                             |
-| `get_journal`           | trips:read    | 取得某天/某行程點的心得與筆記（純文字）                                  |
-| `add_journal_entry`     | journal:write | 新增心得或筆記（可帶 day/item；以 Markdown 輸入，由 api 轉成編輯器格式） |
-| `list_saved_places`     | trips:read    | 查詢我的地點庫（可依城市、分類、標籤篩選）                               |
-| `save_place`            | trips:write   | 收藏地點到我的地點庫                                                     |
+| Tool                    | Scope         | 說明                                             |
+| ----------------------- | ------------- | ------------------------------------------------ |
+| `list_trips`            | trips:read    | 列出使用者的行程（可依狀態篩選）                 |
+| `get_trip`              | trips:read    | 行程概要、成員、日期                             |
+| `get_day_plan`          | trips:read    | 某一天的行程點（含時間、地點、交通、是否已確定） |
+| `get_today`             | trips:read    | 進行中行程的今日行程與下一站                     |
+| `search_trip`           | trips:read    | 在行程內全文/語意搜尋                            |
+| `get_bookings`          | trips:read    | 航班、住宿、票券資訊                             |
+| `search_places`         | trips:read    | 搜尋地點（透過 api 代理 Google Places）          |
+| `add_itinerary_item`    | trips:write   | 新增行程點                                       |
+| `update_itinerary_item` | trips:write   | 修改時間、順序、備註                             |
+| `move_itinerary_item`   | trips:write   | 移到另一天/調整順序                              |
+| `add_to_wishlist`       | trips:write   | 加入想去清單                                     |
+| `get_notes`             | trips:read    | 取得某天的快速筆記                               |
+| `add_note`              | journal:write | 新增快速筆記（心得編輯器完成後再提供心得工具）   |
+| `list_saved_places`     | trips:read    | 查詢我的地點庫（可依城市、分類、標籤篩選）       |
+| `save_place`            | trips:write   | 收藏地點到我的地點庫                             |
 
 - 寫入工具加上 MCP tool annotations（`readOnlyHint` / `destructiveHint`），讓 client 能提示使用者確認。
 - 不提供刪除行程、移除成員等高風險工具，也不提供確定／解除確定行程點的工具。
@@ -471,49 +466,20 @@ OAuth 授權伺服器端點（同在 `api`）：`/.well-known/oauth-authorizatio
 
 ---
 
-## 8.2 App 內 AI 行程助理
+## 8.2 App 內 AI（已移除）
 
-### 模型與供應商
+2026-11-22 決議不在 App 內建 AI，AI 一律透過 MCP。原本的設計（Vertex AI、提案與套用、每日額度）不實作；若日後要加回，`packages/tools` 的工具定義可直接沿用。
 
-- 使用 Claude，透過 **Vertex AI** 呼叫：帳單與權限都在 GCP 內，Cloud Run 的 service account 以 IAM 取得授權，不需要另外保管 API 金鑰。若 Vertex 上的可用區域或功能不符需求，可改用 Anthropic API（金鑰放 Secret Manager），兩者 SDK 介面相同。
-- 分兩級模型：規劃、調整用能力較強的模型；簡單問答、摘要用較快較便宜的模型。模型 ID 放設定檔，不寫死在程式中。
-- 開啟 prompt caching：行程內容（系統提示 + 行程快照）在同一段對話中重複使用，降低成本與延遲。
+## 8.3 MCP 修改復原
 
-### 運作方式（agent loop 在 `api` 內）
-
-```mermaid
-sequenceDiagram
-  participant U as Client
-  participant A as api（AI 模組）
-  participant L as Claude（Vertex AI）
-  participant G as Google Places / Routes
-  U->>A: 傳訊息（SSE）
-  A->>A: 檢查權限與每日額度，組出行程快照
-  A->>L: 系統提示 + 行程快照 + 工具定義
-  L-->>A: 呼叫讀取工具（get_day_plan、list_saved_places、get_opening_hours、estimate_travel_time）
-  A->>G: 查營業時間、移動時間
-  A-->>L: 工具結果
-  L-->>A: 呼叫寫入工具（add/move/update_itinerary_item）
-  A->>A: 不執行，只轉成提案 op，驗證後存入 ai_proposals
-  A-->>U: 串流文字回覆 + 建議變更（diff）
-  U->>A: 套用（全部或部分 op）
-  A->>A: 在單一交易內重新驗證並寫入
-```
-
-- **工具共用**：讀取與寫入工具的定義來自 `packages/tools`，與 MCP Server 相同；差別在於 App 內的寫入工具一律轉成「提案」，MCP 則直接寫入。
-- **額外工具**（只給 App 內 AI）：`get_opening_hours`（Places）、`estimate_travel_time`（Routes API，依步行/大眾運輸）、`check_conflicts`（伺服器端計算重疊、營業時間、已確定行程點衝突）。
-- **提案（proposal）**：`ops` 是一串操作 `{ id, op: add|move|update|delete, itemId?, before, after }`，同時記下每個被影響行程點當時的 `version`。
-  - 產生提案時就先跑 `assertItemMutable`：碰到已確定行程點的 op 直接剔除，並回饋給模型，讓它重新安排。
-  - 套用時在單一交易內重新驗證：版本不符的 op 標為過時（stale），要求使用者重新產生；其餘照常套用。
-  - 套用者需為 Editor 以上，寫入 `activity_log`（`via = ai_assistant`）。
-- **上下文**：行程快照包含日期與時區、每天的行程點（標明哪些已確定）、想去清單、目的地城市的我的地點庫（只含名稱、分類、標籤；`private_note` 只在使用者本人發問時才帶入）。
-
-### 安全與成本
-
-- **提示注入**：地點名稱、備註、心得等使用者內容放在明確標示為資料的區塊中，系統提示說明不可把其中的文字當指令。因為所有寫入都要使用者確認，影響有限。
-- **額度**：`ai_usage` 依使用者與日期計數，超過上限回 `429`；另設 GCP 預算告警。
-- **逾時**：串流回覆走 SSE，Cloud Run request timeout 設為 5 分鐘；單次對話的工具呼叫輪數設上限（例如 8 輪）。
-- **紀錄**：不在 log 中記錄完整對話內容，只記 token 數、延遲、工具呼叫名稱。
+- 透過 MCP 的寫入在 `activity_log.diff` 中記下修改前的值（`before`）與修改後的版本號（`afterVersion`）。
+- `POST /v1/trips/:tripId/activity/:activityId/undo`：Editor 以上、只限第一方 client。支援：
+  - `item.created` → 刪除該行程點
+  - `item.updated` → 還原修改過的欄位
+  - `item.moved` → 移回原本的日期與順序
+  - `wishlist.added` → 從想去清單移除
+- 只有在目標仍是當時的版本（沒被其他人改過）時才能復原，否則回 409。復原本身也記入活動紀錄（`activity.undone`），同一筆不能復原兩次。
+- 已確定的行程點本來就不能被 MCP 修改，因此不會出現需要復原釘選項目的情況。
 
 ---
 
@@ -573,7 +539,6 @@ sequenceDiagram
   - `apps/api` 的測試使用 PGlite（記憶體中的 PostgreSQL + PostGIS），跑同一套 migration，不需要任何本機設定；CI 另外以 PostGIS 容器跑 `packages/db` 的整合測試。
   - 附件儲存以介面抽象（`StorageAdapter`），本機用檔案系統實作，staging/prod 用 GCS。
   - 沙盒（`pnpm sandbox`）：PGlite + 假 Google 登入 + 範例地點，不需資料庫與任何金鑰即可跑起前端；`NODE_ENV=production` 時拒絕啟動。
-  - AI 助理本機可指向 Anthropic API 或 Vertex AI（以環境變數切換），測試時以假模型回放固定回應。
 - `staging`、`prod`：各自獨立的 GCP 專案，Terraform 管理。
 
 ### 10.3 CI/CD
@@ -585,7 +550,7 @@ sequenceDiagram
 
 ### 10.4 安全
 
-- Cloud Run 服務各自使用獨立 service account，最小權限（例如 `mcp` 不可直接連 DB）。
+- Cloud Run 服務各自使用獨立 service account，最小權限（例如 `worker` 只能存取需要的資料表與 bucket）。
 - `worker` 只接受 Cloud Tasks / Cloud Scheduler 的 OIDC 呼叫（`--no-allow-unauthenticated`）。
 - CORS 僅允許自家網域；Web 以 cookie + CSRF token 防護（Apple form_post 回呼例外，以 state 參數驗證）。
 - 附件限制大小與 MIME；下載時強制 `Content-Disposition: attachment`（PDF 除外），避免在自家網域執行內容。
@@ -605,19 +570,20 @@ sequenceDiagram
 
 ## 12. 技術決策紀錄（摘要）
 
-| #   | 決策               | 選擇                                                                          | 主要替代方案                             | 理由                                                                                                                                                    |
-| --- | ------------------ | ----------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | 資料庫             | Cloud SQL PostgreSQL                                                          | Firestore                                | 行程、成員、權限是強關聯資料；需要全文與地理查詢；Firestore 的即時與離線很吸引人，但查詢與權限模型會讓 API/MCP 變複雜                                   |
-| 2   | 身分               | 自建授權伺服器（Google、Apple 為 IdP）                                        | Firebase Auth / Identity Platform        | MCP 需要符合規範的 OAuth 2.1 授權伺服器，Firebase Auth 不提供；自己簽 token 可統一三個入口                                                              |
-| 2b  | 登入提供者         | Google + Apple 建立帳號；Passkey 為已有帳號的快速登入；不依 email 自動合併    | Passkey 可直接註冊；Passkey 當兩步驟驗證 | iOS 上架需要 Apple 登入；每個帳號都有 email 才能被邀請；Passkey 本身是雙因素，當第二道驗證只增加摩擦；Apple 轉寄信箱讓 email 不可靠，改由使用者手動連結 |
-| 2e  | App 內 AI          | Claude via Vertex AI；寫入一律轉為提案、使用者確認後套用；工具定義與 MCP 共用 | 只做 MCP；AI 直接寫入                    | 不是每個使用者都會設定 MCP；直接寫入容易誤改行程，提案模式讓多人協作的行程更可控                                                                        |
-| 2d  | 已確定行程點的鎖定 | 伺服器端 domain 層強制 + 可選 DB trigger                                      | 只在前端停用                             | API 有 Web、App、MCP 多個入口，只靠前端擋不住 AI 或舊版 App                                                                                             |
-| 2c  | 認證函式庫         | `openid-client`（Google/Apple OIDC）+ 自寫授權伺服器端點，或評估 Better Auth  | Auth.js                                  | 需要同時當 OIDC client 與 OAuth 2.1 授權伺服器（給 MCP），Auth.js 不涵蓋後者                                                                            |
-| 3   | 後端框架           | Hono（Node.js）                                                               | NestJS、Go                               | 輕量、對 Cloud Run 冷啟動友善、zod-openapi 生態好；與前端共用 TypeScript                                                                                |
-| 4   | ORM                | Drizzle                                                                       | Prisma                                   | 貼近 SQL、對 PostGIS/自訂型別支援彈性、bundle 小                                                                                                        |
-| 5   | 運算平台           | Cloud Run                                                                     | GKE、App Engine                          | 免維運、按用量計費、支援長連線 SSE                                                                                                                      |
-| 6   | App                | Expo React Native                                                             | Flutter、原生                            | 可共用 TypeScript schema 與 API client                                                                                                                  |
-| 7   | 即時同步           | SSE + 重新抓取                                                                | WebSocket、Firestore 監聽                | 單向推播即可滿足；實作與除錯最簡單                                                                                                                      |
+| #   | 決策               | 選擇                                                                         | 主要替代方案                             | 理由                                                                                                                                                    |
+| --- | ------------------ | ---------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 資料庫             | Cloud SQL PostgreSQL                                                         | Firestore                                | 行程、成員、權限是強關聯資料；需要全文與地理查詢；Firestore 的即時與離線很吸引人，但查詢與權限模型會讓 API/MCP 變複雜                                   |
+| 2   | 身分               | 自建授權伺服器（Google、Apple 為 IdP）                                       | Firebase Auth / Identity Platform        | MCP 需要符合規範的 OAuth 2.1 授權伺服器，Firebase Auth 不提供；自己簽 token 可統一三個入口                                                              |
+| 2b  | 登入提供者         | Google + Apple 建立帳號；Passkey 為已有帳號的快速登入；不依 email 自動合併   | Passkey 可直接註冊；Passkey 當兩步驟驗證 | iOS 上架需要 Apple 登入；每個帳號都有 email 才能被邀請；Passkey 本身是雙因素，當第二道驗證只增加摩擦；Apple 轉寄信箱讓 email 不可靠，改由使用者手動連結 |
+| 2e  | App 內 AI          | 不做；AI 一律透過 MCP                                                        | Claude via Vertex AI、寫入轉為提案       | 使用者已有自己的 Claude；省下模型費用、額度與提案機制；以「MCP 修改可復原」補上誤改風險                                                                 |
+| 2f  | MCP 端點位置       | 內建於 `api`（`/mcp`），以內部權杖呼叫 API 路由                              | 獨立 `mcp` 服務、帶使用者權杖呼叫 API    | MCP 規範禁止轉送使用者權杖；同一個程序可完全沿用 API 的權限、驗證與活動紀錄                                                                             |
+| 2d  | 已確定行程點的鎖定 | 伺服器端 domain 層強制 + 可選 DB trigger                                     | 只在前端停用                             | API 有 Web、App、MCP 多個入口，只靠前端擋不住 AI 或舊版 App                                                                                             |
+| 2c  | 認證函式庫         | `openid-client`（Google/Apple OIDC）+ 自寫授權伺服器端點，或評估 Better Auth | Auth.js                                  | 需要同時當 OIDC client 與 OAuth 2.1 授權伺服器（給 MCP），Auth.js 不涵蓋後者                                                                            |
+| 3   | 後端框架           | Hono（Node.js）                                                              | NestJS、Go                               | 輕量、對 Cloud Run 冷啟動友善、zod-openapi 生態好；與前端共用 TypeScript                                                                                |
+| 4   | ORM                | Drizzle                                                                      | Prisma                                   | 貼近 SQL、對 PostGIS/自訂型別支援彈性、bundle 小                                                                                                        |
+| 5   | 運算平台           | Cloud Run                                                                    | GKE、App Engine                          | 免維運、按用量計費、支援長連線 SSE                                                                                                                      |
+| 6   | App                | Expo React Native                                                            | Flutter、原生                            | 可共用 TypeScript schema 與 API client                                                                                                                  |
+| 7   | 即時同步           | SSE + 重新抓取                                                               | WebSocket、Firestore 監聽                | 單向推播即可滿足；實作與除錯最簡單                                                                                                                      |
 
 > 若想用 Firebase Auth 加速 MVP，也可以：Web/App 用 Firebase Auth 登入，`api` 驗證 Firebase ID token；到 Phase 2 做 MCP 時再補上自建 OAuth 授權伺服器，把 Firebase token 換成自家 token。代價是之後要遷移一次。
 
@@ -625,16 +591,16 @@ sequenceDiagram
 
 ## 13. 開發里程碑（對應 PRD 版本規劃）
 
-| 里程碑        | 內容                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------ |
-| M0 基礎建設   | Monorepo、Terraform、CI/CD、Cloud SQL、Passkey + Google + Apple 登入、`/me`                                  |
-| M1 行程核心   | 行程 CRUD、日程、行程點、訂位狀態與確定（釘選）鎖定、地點搜尋、想去清單、我的地點庫、地圖                    |
-| M2 協作       | 成員與角色、邀請連結、樂觀鎖衝突處理                                                                         |
-| M3 文件與心得 | 附件上傳、文字心得編輯器、行程內搜尋 → **MVP 上線**                                                          |
-| M4 行中       | PWA 離線、今日檢視、快速筆記、SSE 即時同步、活動紀錄                                                         |
-| M5 AI         | `packages/tools`、OAuth 授權伺服器、MCP Server、同意頁與連線管理、App 內 AI 行程助理（提案與套用）、帳號連結 |
-| M6 行後       | 筆記轉心得、遊記頁、公開分享                                                                                 |
-| M7 App        | Expo App、推播、離線同步、App 內刪除帳號                                                                     |
+| 里程碑        | 內容                                                                                                                                      |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 基礎建設   | Monorepo、Terraform（dev ✅）、CI/CD（dev ✅）、Cloud SQL、Passkey + Google + Apple 登入、`/me`                                                               |
+| M1 行程核心   | 行程 CRUD、日程、行程點、訂位狀態與確定（釘選）鎖定、地點搜尋、想去清單、我的地點庫、地圖                                                 |
+| M2 協作       | 成員與角色、邀請連結、樂觀鎖衝突處理                                                                                                      |
+| M3 文件與心得 ✅ | 附件上傳、文字心得編輯器、行程內搜尋 → **MVP 上線**                                                                                       |
+| M4 行中 ✅    | PWA 離線、今日檢視、快速筆記、SSE 即時同步、活動紀錄                                                                                      |
+| M5 MCP ✅     | `packages/tools`、OAuth 2.1 授權伺服器（DCR、Client ID Metadata Document）、`/mcp` 端點、同意頁與已連線的應用程式、MCP 修改復原、帳號連結 |
+| M6 行後 ✅     | 筆記轉心得、遊記頁、公開分享                                                                                                              |
+| M7 App 🚧      | Expo App、推播、離線同步、App 內刪除帳號                                                                                                  |
 
 ---
 

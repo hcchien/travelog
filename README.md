@@ -48,11 +48,41 @@ pnpm lint && pnpm typecheck && pnpm test
 - `packages/domain`：純單元測試。
 - `apps/api`：在 PGlite（記憶體中的 PostgreSQL，含 PostGIS）上跑完整 API 流程，不需要任何設定。
   Passkey 以軟體 authenticator 產生真的 WebAuthn 簽章來測試；Google 與 Places 以假的實作替換。
-- `packages/db`：需要 `TEST_DATABASE_URL`，在真的 PostgreSQL 上驗證 migration 與 trigger；
+- `packages/db`：需要 `TEST_DATABASE_URL`，在真的 PostgreSQL（含 PostGIS）上驗證 migration 與 trigger；
   沒設定時會跳過。CI 會用 PostGIS 容器執行。
 - 端到端冒煙測試：先開沙盒 API 與 Web（`pnpm --filter @travelog/web build && pnpm --filter @travelog/web start`），
   再執行 `pnpm e2e`（第一次需 `npx playwright install chromium`）。兩個使用者走過建立行程、想去清單、
-  訂位釘選、拖拉排序、邀請加入、我的地點庫等流程，截圖存在 `e2e/screenshots/`。
+  訂位釘選、拖拉排序、邀請加入、我的地點庫、即時同步、行程內搜尋、今日頁與快速筆記、離線開啟、
+  MCP 授權同意、MCP 修改後一鍵復原、撤銷授權等流程，截圖存在 `e2e/screenshots/`。
+
+## App（apps/mobile）
+
+Expo SDK 58。Google Sign-In 與推播是原生模組，需要 development build（不能用 Expo Go）：
+
+```bash
+cp apps/mobile/.env.example apps/mobile/.env   # 填 API 網址與 Google client ID
+pnpm --filter @travelog/mobile ios             # 或 android；需要 Xcode／Android Studio
+pnpm --filter @travelog/mobile bundle:check    # 不需要模擬器：確認 JS 能打包
+```
+
+配合 `pnpm sandbox` 時設 `EXPO_PUBLIC_SANDBOX_LOGIN=1`，登入頁會出現沙盒登入。App 以查看與記錄為主：
+行程規劃、邀請、分享在網站上做。
+
+## 部署
+
+推到 `dev` 分支就會部署到 GCP dev 環境；第一次設定見 [`docs/DEPLOY.md`](docs/DEPLOY.md)。
+
+## 用 AI 操作行程（MCP）
+
+Travelog 不內建 AI，而是提供 MCP 連接器，讓你在自己慣用的 AI（例如 Claude）裡查詢與調整行程。
+
+1. 在 AI 工具新增自訂連接器，網址填 `https://<API 網域>/mcp`（本機為 `http://localhost:8080/mcp`）。
+2. AI 工具會自動註冊並開啟 Travelog 的授權頁，選擇要給的權限（讀取／修改行程／新增筆記）後按「允許」。
+3. 之後就能說「Day 2 下午幫我加嵐山散步」「明天第一站在哪」。
+
+- AI 以你的身分操作，權限與你在每趟行程的角色相同；不能修改已訂位的行程點、不能邀請成員或刪除行程。
+- 透過 MCP 的修改都會在「成員與分享」的活動紀錄標示 MCP，可以一鍵復原。
+- 在「帳號設定 → 已連結的 AI 工具」可隨時撤銷，撤銷後立即失效。
 
 ## 目前進度
 
@@ -62,9 +92,16 @@ pnpm lint && pnpm typecheck && pnpm test
 - [x] 地點搜尋（Google Places）、想去清單（投票、排入某天）、我的地點庫
 - [x] 成員與邀請（連結、email）、角色、移除、離開、轉移擁有權
 - [x] Web 前端：登入、我的行程、行程規劃、成員與分享、我的地點、帳號設定
+- [x] M4 行中：今日頁、快速筆記、PWA 與離線快照、SSE 即時同步、行程內搜尋
+- [x] M5 MCP：OAuth 2.1 授權伺服器（DCR、Client ID Metadata Document、PKCE）、`/mcp` 端點與 15 個工具、
+      同意頁、已連結的 AI 工具與撤銷、MCP 修改一鍵復原、連結多個 Google 帳號
+- [x] M3：文件附件（PDF／截圖，直接上傳到 GCS Signed URL）、心得編輯器（受限的 Tiptap，只有文字）
+- [x] M6：筆記轉心得、公開遊記（分享連結、隱藏住宿／只公開心得、可停用）
+- [x] 邀請信：Resend（沒有金鑰時只寫 log）
+- [x] M7 App（Expo）：Google 登入、行程表、今日頁、離線快取、離線筆記佇列、心得、附件、推播、刪除帳號
+- [x] 部署：Dockerfile、Terraform（Cloud Run、Cloud SQL、GCS、Secret Manager、WIF）、推到 `dev` 自動部署（`docs/DEPLOY.md`）
 - [ ] Apple 登入（需要 Apple Developer 帳號）
-- [ ] 邀請信實際寄送（目前只記錄在 log）
-- [ ] 文件附件上傳、心得、PWA 離線、即時同步、MCP、App 內 AI、行動 App
+- [ ] App 上架（EAS Build、App Store／Play 審核）、Passkey 原生登入
 
 ## 授權
 

@@ -12,7 +12,8 @@
       "!**/drizzle/meta",
       "!**/.next",
       "!**/next-env.d.ts",
-      "!**/*.svg"
+      "!**/*.svg",
+      "!**/.expo-export"
     ]
   },
   "formatter": {
@@ -36,5 +37,22 @@
     "parser": {
       "tailwindDirectives": true
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/mobile/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noReactNativeRawText": {
+              "level": "error",
+              "options": {
+                "skip": ["Muted", "Link"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

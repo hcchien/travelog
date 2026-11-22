@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Attachments } from "@/components/attachments";
 import { ApiError, api, errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { BOOKING_KINDS, BOOKING_STATUSES, confirmedLabel, ITEM_TYPES } from "@/lib/items";
 import { isoToZoned, offsetFromTaipei, zonedToIso } from "@/lib/time";
 import type {
@@ -59,6 +61,7 @@ export function ItemDialog(props: Props) {
 
 function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
   const toast = useToast();
+  const { me } = useAuth();
   const day = trip.days.find((d) => d.id === (item?.dayId ?? dayId));
   const date = day?.date ?? trip.startDate;
   const locked = !!item?.confirmed;
@@ -380,6 +383,16 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
           </div>
         )}
       </fieldset>
+
+      {item && (
+        <Attachments
+          tripId={trip.id}
+          itemId={item.id}
+          canEdit={canEdit}
+          myUserId={me?.id}
+          isOwner={trip.myRole === "owner"}
+        />
+      )}
 
       {error && (
         <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">

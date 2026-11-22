@@ -41,7 +41,11 @@ export const createTripInput = z
 export type CreateTripInput = z.infer<typeof createTripInput>;
 
 export const updateTripInput = z
-  .object(tripFields)
+  .object({
+    ...tripFields,
+    /** 檢視者能否寫自己的心得（只有擁有者能改）。 */
+    viewerCanWriteJournal: z.boolean(),
+  })
   .partial()
   .refine((v) => Object.keys(v).length > 0, "至少要修改一個欄位")
   .refine(validRange, rangeMessage);

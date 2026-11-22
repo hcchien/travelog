@@ -84,6 +84,23 @@ async function placesById(db: DbOrTx, ids: (string | null)[]) {
 }
 
 /** 回應用：附上地點資料。 */
+/** 行程（或某一天；null 為未排入）的所有行程點，含訂位與地點。 */
+export async function listItems(db: DbOrTx, tripId: string, dayId?: string | null) {
+  const rows = await db
+    .select({ item: schema.itineraryItems, booking: schema.bookings })
+    .from(schema.itineraryItems)
+    .leftJoin(schema.bookings, eq(schema.bookings.itemId, schema.itineraryItems.id))
+    .where(dayId === undefined ? eq(schema.itineraryItems.tripId, tripId) : sameDay(tripId, dayId))
+    .orderBy(asc(schema.itineraryItems.dayId), asc(schema.itineraryItems.sortKey));
+  const places = await placesById(
+    db,
+    rows.map((r) => r.item.placeId),
+  );
+  return rows.map((r) =>
+    serializeItem(r.item, r.booking, r.item.placeId ? (places.get(r.item.placeId) ?? null) : null),
+  );
+}
+
 export async function present(db: DbOrTx, item: ItemRow, booking: BookingRow | null) {
   const places = await placesById(db, [item.placeId]);
   return serializeItem(item, booking, item.placeId ? (places.get(item.placeId) ?? null) : null);
@@ -224,27 +241,11 @@ export function itemRoutes(deps: Deps) {
     const { trip, ctx } = await loadTrip(db, c.req.param("tripId"), c.get("auth"));
     assertCan(ctx, "trip.view");
     const dayId = c.req.query("dayId");
-    const where =
-      dayId === undefined
-        ? eq(schema.itineraryItems.tripId, trip.id)
-        : sameDay(trip.id, dayId === "none" ? null : dayId);
-    const rows = await db
-      .select({ item: schema.itineraryItems, booking: schema.bookings })
-      .from(schema.itineraryItems)
-      .leftJoin(schema.bookings, eq(schema.bookings.itemId, schema.itineraryItems.id))
-      .where(where)
-      .orderBy(asc(schema.itineraryItems.dayId), asc(schema.itineraryItems.sortKey));
-    const places = await placesById(
-      db,
-      rows.map((r) => r.item.placeId),
-    );
     return c.json({
-      items: rows.map((r) =>
-        serializeItem(
-          r.item,
-          r.booking,
-          r.item.placeId ? (places.get(r.item.placeId) ?? null) : null,
-        ),
+      items: await listItems(
+        db,
+        trip.id,
+        dayId === undefined ? undefined : dayId === "none" ? null : dayId,
       ),
     });
   });
@@ -293,7 +294,11 @@ export function itemRoutes(deps: Deps) {
           .values({ ...input.booking, itemId: item.id })
           .returning();
       }
-      await log(tx, me, trip, "item.created", item.id, { title: item.title, booked });
+      await log(tx, me, trip, "item.created", item.id, {
+        title: item.title,
+        booked,
+        afterVersion: item.version,
+      });
       return { item, booking, warnings: await overlapWarnings(tx, item) };
     });
     c.header("ETag", etag(result.item.version));
@@ -341,7 +346,16 @@ export function itemRoutes(deps: Deps) {
           if (startAt && endAt && endAt < startAt) throw conflict("結束時間不能早於開始時間");
 
           const row = await bumpItem(tx, item, me, patch);
-          await log(tx, me, trip, "item.updated", item.id, patch);
+          // 記下修改前的值，供復原（ARCHITECTURE §8.3）
+          const before = Object.fromEntries(
+            Object.keys(patch).map((k) => [k, item[k as keyof ItemRow] ?? null]),
+          );
+          await log(tx, me, trip, "item.updated", item.id, {
+            title: row.title,
+            after: patch,
+            before,
+            afterVersion: row.version,
+          });
           return { item: row, booking, warnings: await overlapWarnings(tx, row) };
         },
       );
@@ -374,9 +388,12 @@ export function itemRoutes(deps: Deps) {
 
           const row = await bumpItem(tx, item, me, { dayId, sortKey });
           await log(tx, me, trip, "item.moved", item.id, {
+            title: item.title,
             fromDayId: item.dayId,
+            fromSortKey: item.sortKey,
             toDayId: dayId,
             index: at,
+            afterVersion: row.version,
           });
           return { item: row, booking, warnings: await overlapWarnings(tx, row) };
         },

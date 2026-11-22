@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import { ToastProvider } from "@/components/toast";
 import { AuthProvider } from "@/lib/auth";
 
@@ -16,6 +17,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={client}>
       <ToastProvider>
         <AuthProvider>{children}</AuthProvider>
+        <ServiceWorkerRegister />
       </ToastProvider>
     </QueryClientProvider>
   );

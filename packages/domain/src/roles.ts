@@ -8,9 +8,8 @@ export type TripRole = (typeof TRIP_ROLES)[number];
  * 請求來源。
  * - web / app：第一方 client
  * - mcp：外部 AI client（透過 MCP）
- * - ai_assistant：App 內 AI 助理（只會產生提案，不直接寫入）
  */
-export const ACCESS_CHANNELS = ["web", "app", "mcp", "ai_assistant"] as const;
+export const ACCESS_CHANNELS = ["web", "app", "mcp"] as const;
 export type AccessChannel = (typeof ACCESS_CHANNELS)[number];
 
 export const FIRST_PARTY_CHANNELS: ReadonlySet<AccessChannel> = new Set(["web", "app"]);
@@ -39,8 +38,8 @@ export const TRIP_ACTIONS = {
   "journal.writeOwn": { minRole: "viewer", firstPartyOnly: false },
   "member.invite": { minRole: "editor", firstPartyOnly: true },
   "member.manage": { minRole: "owner", firstPartyOnly: true },
-  "ai.chat": { minRole: "viewer", firstPartyOnly: true },
-  "ai.applyProposal": { minRole: "editor", firstPartyOnly: true },
+  /** 復原透過 MCP 的修改。 */
+  "activity.undo": { minRole: "editor", firstPartyOnly: true },
 } as const satisfies Record<string, { minRole: TripRole; firstPartyOnly: boolean }>;
 
 export type TripAction = keyof typeof TRIP_ACTIONS;
@@ -59,8 +58,6 @@ export interface TripSettings {
 export function can(ctx: AccessContext, action: TripAction, settings: TripSettings = {}): boolean {
   const rule = TRIP_ACTIONS[action];
   if (rule.firstPartyOnly && !FIRST_PARTY_CHANNELS.has(ctx.via)) return false;
-  // App 內 AI 只產生提案，任何寫入都不能以 ai_assistant 身分直接執行。
-  if (ctx.via === "ai_assistant" && action !== "trip.view") return false;
   if (action === "journal.writeOwn" && ctx.role === "viewer") {
     return settings.viewerCanWriteJournal ?? true;
   }

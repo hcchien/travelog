@@ -51,3 +51,33 @@ export async function findOrCreateUser(
     return { userId: user.id, created: true };
   });
 }
+
+/**
+ * 把身分連結到既有帳號。已連結到同一個帳號時視為成功；已屬於其他帳號時回傳 conflict。
+ */
+export async function linkIdentity(
+  db: Database,
+  userId: string,
+  provider: "google" | "apple",
+  profile: IdentityProfile,
+): Promise<"linked" | "already" | "conflict"> {
+  const [existing] = await db
+    .select({ userId: schema.userIdentities.userId })
+    .from(schema.userIdentities)
+    .where(
+      and(
+        eq(schema.userIdentities.provider, provider),
+        eq(schema.userIdentities.providerSub, profile.sub),
+      ),
+    );
+  if (existing) return existing.userId === userId ? "already" : "conflict";
+  await db.insert(schema.userIdentities).values({
+    userId,
+    provider,
+    providerSub: profile.sub,
+    email: profile.email,
+    emailVerified: profile.emailVerified,
+    isPrivateRelay: profile.email?.endsWith("@privaterelay.appleid.com") ?? false,
+  });
+  return "linked";
+}

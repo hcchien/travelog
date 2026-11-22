@@ -22,15 +22,17 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { ChevronLeft, Plus, Pushpin, UserPlus } from "@/components/icons";
+import { ChevronLeft, Plus, Pushpin, Search, UserPlus } from "@/components/icons";
 import { ItemCard } from "@/components/planner/item-card";
 import { ItemDialog } from "@/components/planner/item-dialog";
+import { SearchDialog } from "@/components/planner/search-dialog";
 import { SidePanel } from "@/components/planner/side-panel";
 import { useToast } from "@/components/toast";
 import { TripForm } from "@/components/trip-form";
 import { Avatar, Button, cx, Dialog, EmptyState } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { RequireAuth } from "@/lib/auth";
+import { useTripEvents } from "@/lib/live";
 import { keys, useItems, useTrip } from "@/lib/queries";
 import { formatDay, formatRange, offsetFromTaipei, today } from "@/lib/time";
 import type { Item, TripDay, Warning } from "@/lib/types";
@@ -83,6 +85,9 @@ function Planner() {
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ item: Item | null } | null>(null);
   const [editingTrip, setEditingTrip] = useState(false);
+  const [searching, setSearching] = useState(false);
+  // 其他成員（或 MCP）修改時即時更新
+  useTripEvents(tripId);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -214,6 +219,28 @@ function Planner() {
                 <Avatar key={m.userId} name={m.displayName} ring />
               ))}
             </div>
+            {today() >= t.startDate && today() <= t.endDate && (
+              <Link
+                href={`/trips/${tripId}/today`}
+                className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-sm font-semibold text-white"
+              >
+                今日
+              </Link>
+            )}
+            <button
+              type="button"
+              aria-label="搜尋這趟行程"
+              onClick={() => setSearching(true)}
+              className="flex size-9 items-center justify-center rounded-lg border border-line-strong text-ink-soft"
+            >
+              <Search />
+            </button>
+            <Link
+              href={`/trips/${tripId}/journal`}
+              className="inline-flex h-9 items-center rounded-lg border border-line-strong px-3.5 text-sm font-semibold"
+            >
+              心得
+            </Link>
             <Link
               href={`/trips/${tripId}/members`}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3.5 text-sm font-semibold"
@@ -330,6 +357,18 @@ function Planner() {
           setDialog(null);
           showWarnings(w);
           invalidate();
+        }}
+      />
+
+      <SearchDialog
+        trip={t}
+        open={searching}
+        onClose={() => setSearching(false)}
+        onPickItem={(itemId, dayId) => {
+          setSearching(false);
+          setSelected(dayId ?? NONE);
+          const it = items.data?.find((i) => i.id === itemId);
+          if (it) setDialog({ item: it });
         }}
       />
 

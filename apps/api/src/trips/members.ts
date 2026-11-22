@@ -9,6 +9,7 @@ import { requireAuth } from "../lib/middleware.js";
 import { ApiError, conflict, notFound } from "../lib/problem.js";
 import { validate } from "../lib/validate.js";
 import { loadTrip, logActivity } from "./access.js";
+import { UNDOABLE_ACTIONS } from "./undo.js";
 
 type InvitationRow = typeof schema.invitations.$inferSelect;
 
@@ -203,17 +204,25 @@ export function memberRoutes(deps: Deps) {
       if (!inv) throw new Error("建立邀請失敗");
       const url = `${config.appOrigin}/invite/${token}`;
 
+      let emailSent: boolean | undefined;
       if (inv.email) {
         const [inviter] = await db
           .select({ name: schema.users.displayName })
           .from(schema.users)
           .where(eq(schema.users.id, me.userId));
-        await deps.mailer.sendInvitation({
-          to: inv.email,
-          url,
-          tripTitle: trip.title,
-          inviterName: inviter?.name ?? "",
-        });
+        // 寄信失敗不影響邀請本身：連結仍可複製分享
+        emailSent = await deps.mailer
+          .sendInvitation({
+            to: inv.email,
+            url,
+            tripTitle: trip.title,
+            inviterName: inviter?.name ?? "",
+          })
+          .then(() => true)
+          .catch((err: unknown) => {
+            console.error("[mailer] 邀請信寄送失敗", err);
+            return false;
+          });
       }
       await logActivity(db, {
         tripId: trip.id,
@@ -225,7 +234,14 @@ export function memberRoutes(deps: Deps) {
         diff: { role: inv.role, email: inv.email },
       });
       // token 只在建立時回傳一次；資料庫只存雜湊
-      return c.json({ ...serializeInvitation(inv, now()), url }, 201);
+      return c.json(
+        {
+          ...serializeInvitation(inv, now()),
+          url,
+          ...(emailSent === undefined ? {} : { emailSent }),
+        },
+        201,
+      );
     },
   );
 
@@ -369,7 +385,18 @@ export function memberRoutes(deps: Deps) {
       .where(eq(schema.activityLog.tripId, trip.id))
       .orderBy(desc(schema.activityLog.createdAt))
       .limit(limit);
-    return c.json({ activity: rows });
+    const undone = new Set(
+      rows
+        .filter((r) => r.action === "activity.undone" && r.targetId)
+        .map((r) => r.targetId as string),
+    );
+    return c.json({
+      activity: rows.map((r) => ({
+        ...r,
+        undone: undone.has(r.id),
+        undoable: r.via === "mcp" && UNDOABLE_ACTIONS.has(r.action) && !undone.has(r.id),
+      })),
+    });
   });
 
   return app;

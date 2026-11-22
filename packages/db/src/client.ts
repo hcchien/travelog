@@ -19,8 +19,26 @@ export type Transaction = PgTransaction<
 >;
 export type DbOrTx = Database | Transaction;
 
-export function createDb(url: string, options: { max?: number } = {}) {
-  const sql = postgres(url, { max: options.max ?? 10 });
+/**
+ * Cloud SQL 透過 unix socket 連線：postgres://user:pass@localhost/db?host=/cloudsql/PROJECT:REGION:INSTANCE
+ * （主機名稱只是佔位；postgres-js 需要明確的 socket 檔路徑，這裡轉換成 path 選項。）
+ */
+export function connectionOptions(url: string): { url: string; path?: string } {
+  const u = new URL(url);
+  const host = u.searchParams.get("host");
+  if (!host?.startsWith("/")) return { url };
+  u.searchParams.delete("host");
+  return { url: u.toString(), path: `${host}/.s.PGSQL.${u.port || 5432}` };
+}
+
+export function createDb(url: string, options: { max?: number; quiet?: boolean } = {}) {
+  const conn = connectionOptions(url);
+  const sql = postgres(conn.url, {
+    max: options.max ?? 10,
+    ...(conn.path ? { path: conn.path } : {}),
+    // 「已存在，略過」之類的 NOTICE 不印出
+    ...(options.quiet ? { onnotice: () => {} } : {}),
+  });
   const db: Database = drizzle(sql, { schema });
   return { db, sql };
 }

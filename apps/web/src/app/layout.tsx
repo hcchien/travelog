@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 
+export const viewport = { themeColor: "#16263D" };
+
 export const metadata: Metadata = {
   title: "Travelog",
+  appleWebApp: { capable: true, title: "Travelog", statusBarStyle: "black-translucent" },
   description: "和旅伴一起規劃行程、旅途中隨時查資料、回來後寫下心得。",
 };
 

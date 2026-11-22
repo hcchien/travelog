@@ -3,13 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Plus } from "@/components/icons";
 import { TripForm, type TripFormValue } from "@/components/trip-form";
 import { Button, Dialog, EmptyState, Pill } from "@/components/ui";
 import { api } from "@/lib/api";
 import { RequireAuth } from "@/lib/auth";
+import { prefetchUpcomingSnapshots } from "@/lib/offline";
 import { daysBetween, formatRange, today } from "@/lib/time";
 import type { Trip, TripDetail } from "@/lib/types";
 
@@ -75,6 +76,10 @@ function TripsPage() {
   });
 
   const list = trips.data?.trips ?? [];
+  // 進行中或即將出發的行程：背景下載離線資料
+  useEffect(() => {
+    if (trips.data) prefetchUpcomingSnapshots(trips.data.trips, today());
+  }, [trips.data]);
   const upcoming = list
     .filter((t) => phase(t).group !== "past")
     .sort((a, b) => a.startDate.localeCompare(b.startDate));

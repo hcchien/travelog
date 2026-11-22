@@ -28,6 +28,8 @@ export interface OAuthState {
   nonce: string;
   verifier: string;
   returnTo: string;
+  /** 帳號連結流程：要把 Google 身分加到這個使用者。 */
+  linkUserId?: string;
 }
 
 export async function setOAuthState(c: Context, config: Config, value: OAuthState) {

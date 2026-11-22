@@ -1,0 +1,89 @@
+name: Deploy dev
+
+# 推到 dev 分支：檢查 → 建置映像檔 → 資料庫 migration → 部署 API 與 Web
+# 需要的 repo Variables 由 Terraform 的 github_variables output 提供（docs/DEPLOY.md）
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      REGISTRY: ${{ vars.GCP_REGISTRY }}
+      PREFIX: ${{ vars.SERVICE_PREFIX }}
+      TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 建置 API 映像檔
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/api:${{ env.TAG }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: 建置 Web 映像檔
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/web:${{ env.TAG }}
+          build-args: |
+            NEXT_PUBLIC_API_ORIGIN=${{ vars.API_ORIGIN }}
+            NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}
+            NEXT_PUBLIC_GOOGLE_MAP_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MAP_ID }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: 資料庫 migration
+        run: |
+          gcloud run jobs update "${PREFIX}-migrate" --region "$REGION" --image "${REGISTRY}/api:${TAG}" --quiet
+          gcloud run jobs execute "${PREFIX}-migrate" --region "$REGION" --wait
+
+      - name: 部署 API
+        run: gcloud run deploy "${PREFIX}-api" --region "$REGION" --image "${REGISTRY}/api:${TAG}" --quiet
+
+      - name: 部署 Web
+        run: gcloud run deploy "${PREFIX}-web" --region "$REGION" --image "${REGISTRY}/web:${TAG}" --quiet
+
+      - name: 健康檢查
+        run: |
+          # 用 run.app 網址檢查，不依賴自訂網域的 DNS 是否已生效
+          URL=$(gcloud run services describe "${PREFIX}-api" --region "$REGION" --format='value(uri)')
+          for i in 1 2 3 4 5; do
+            if curl -fsS "${URL}/healthz"; then exit 0; fi
+            sleep 10
+          done
+          echo "API 健康檢查失敗" && exit 1

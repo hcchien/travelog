@@ -18,6 +18,10 @@ let refreshing: Promise<string | null> | null = null;
 export const setAccessToken = (t: string | null) => {
   accessToken = t;
 };
+export const getAccessToken = () => accessToken;
+
+/** 最近一次 refresh 是否因為網路斷線失敗（用來判斷離線模式）。 */
+export let lastRefreshOffline = false;
 
 /** 用 HttpOnly cookie 換新的 access token（同時只發一個請求）。 */
 export function refreshAccessToken(): Promise<string | null> {
@@ -28,11 +32,15 @@ export function refreshAccessToken(): Promise<string | null> {
     body: "{}",
   })
     .then(async (res) => {
+      lastRefreshOffline = false;
       if (!res.ok) return null;
       const body = (await res.json()) as { accessToken: string };
       return body.accessToken;
     })
-    .catch(() => null)
+    .catch(() => {
+      lastRefreshOffline = true;
+      return null;
+    })
     .then((token) => {
       accessToken = token;
       refreshing = null;

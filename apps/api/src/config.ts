@@ -10,6 +10,12 @@ const list = z
       .filter(Boolean),
   );
 
+/** Secret Manager 不能存空字串：部署時以 "unset" 表示「未設定」。 */
+const optionalSecret = z
+  .string()
+  .optional()
+  .transform((v) => (v && v !== "unset" ? v : undefined));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().default(8080),
@@ -35,7 +41,15 @@ const envSchema = z.object({
   JWT_PRIVATE_KEY: z.string().optional(),
   JWT_ISSUER: z.string().default("travelog"),
   /** Google Maps Platform 伺服器金鑰（Places API New）。未設定時地點搜尋回 503。 */
-  GOOGLE_MAPS_SERVER_KEY: z.string().optional(),
+  GOOGLE_MAPS_SERVER_KEY: optionalSecret,
+  /** 附件儲存：gcs（staging／正式）或 local（本機檔案系統）。 */
+  STORAGE_DRIVER: z.enum(["gcs", "local"]).default("local"),
+  GCS_BUCKET: z.string().optional(),
+  LOCAL_STORAGE_DIR: z.string().default(".data/attachments"),
+  /** Resend API 金鑰。未設定時信件只寫到 log。 */
+  RESEND_API_KEY: optionalSecret,
+  /** 寄件者，例如 "Travelog <hello@travelog.app>"（網域需先在 Resend 驗證）。 */
+  MAIL_FROM: z.string().default("Travelog <onboarding@resend.dev>"),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -55,6 +69,8 @@ export interface Config {
   accessTokenTtlSeconds: number;
   refreshTokenTtlDays: number;
   mapsServerKey: string | undefined;
+  storage: { driver: "gcs"; bucket: string } | { driver: "local"; dir: string };
+  mail: { resendApiKey: string | undefined; from: string };
 }
 
 export function loadConfig(source: Record<string, string | undefined> = process.env): Config {
@@ -66,6 +82,12 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   const e = parsed.data;
   if (e.NODE_ENV === "production" && !e.JWT_PRIVATE_KEY) {
     throw new Error("正式環境必須設定 JWT_PRIVATE_KEY");
+  }
+  if (e.STORAGE_DRIVER === "gcs" && !e.GCS_BUCKET) {
+    throw new Error("STORAGE_DRIVER=gcs 時必須設定 GCS_BUCKET");
+  }
+  if (e.NODE_ENV === "production" && e.STORAGE_DRIVER !== "gcs") {
+    throw new Error("正式環境的附件必須存在 GCS（STORAGE_DRIVER=gcs）");
   }
   const allowedOrigins = [e.APP_ORIGIN, ...e.EXTRA_ORIGINS].map((o) => new URL(o).origin);
   return {
@@ -92,5 +114,10 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     accessTokenTtlSeconds: 15 * 60,
     refreshTokenTtlDays: 60,
     mapsServerKey: e.GOOGLE_MAPS_SERVER_KEY || undefined,
+    storage:
+      e.STORAGE_DRIVER === "gcs"
+        ? { driver: "gcs", bucket: e.GCS_BUCKET as string }
+        : { driver: "local", dir: e.LOCAL_STORAGE_DIR },
+    mail: { resendApiKey: e.RESEND_API_KEY || undefined, from: e.MAIL_FROM },
   };
 }

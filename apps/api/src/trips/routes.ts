@@ -10,7 +10,7 @@ import { validate } from "../lib/validate.js";
 import { etag, loadTrip, logActivity, requireIfMatch, type TripRow } from "./access.js";
 import { datesBetween } from "./days.js";
 
-const serializeTrip = (t: TripRow) => ({
+export const serializeTrip = (t: TripRow) => ({
   id: t.id,
   title: t.title,
   startDate: t.startDate,
@@ -20,6 +20,7 @@ const serializeTrip = (t: TripRow) => ({
   cover: t.cover,
   status: t.status,
   ownerId: t.ownerId,
+  viewerCanWriteJournal: t.viewerCanWriteJournal,
   version: t.version,
   createdAt: t.createdAt,
   updatedAt: t.updatedAt,
@@ -106,6 +107,7 @@ export function tripRoutes(deps: Deps) {
     const updated = await db.transaction(async (tx) => {
       const { trip, ctx } = await loadTrip(tx, c.req.param("tripId"), me);
       assertCan(ctx, "trip.update");
+      if (input.viewerCanWriteJournal !== undefined) assertCan(ctx, "member.manage");
       requireIfMatch(c, trip.version);
 
       const startDate = input.startDate ?? trip.startDate;

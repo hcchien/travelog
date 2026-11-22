@@ -30,7 +30,10 @@ async function newUser() {
     locale: "zh-TW",
   });
   const page = await ctx.newPage();
-  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
+  page.on(
+    "console",
+    (m) => m.type() === "error" && errors.push(`console: ${m.text()} @ ${m.location()?.url ?? ""}`),
+  );
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("response", (r) => {
     if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.request().method()} ${r.url()}`);
@@ -192,9 +195,240 @@ await page.goto(tripUrl);
 await page.getByRole("heading", { name: "京都秋楓之旅" }).waitFor();
 await page.screenshot({ path: out("07-mobile"), fullPage: true });
 
+// ---- M4：行程中
+await page.setViewportSize({ width: 1440, height: 1000 });
+const tripId = tripUrl.split("/").pop();
+const API = process.env.API_ORIGIN ?? "http://localhost:8080";
+
+// 即時更新：小安新增行程點，陳的頁面不重新整理也會看到
+await page.goto(tripUrl);
+await page.locator("ol > li").first().waitFor();
+await page.waitForTimeout(800); // 等 SSE 連上
+await second.page.getByRole("button", { name: "新增行程點" }).click();
+const add2 = second.page.getByRole("dialog", { name: "新增行程點" });
+await add2.getByLabel("名稱").fill("錦市場午餐");
+await add2.getByRole("button", { name: "新增" }).click();
+await page.getByText("錦市場午餐").first().waitFor({ timeout: 8000 });
+log("即時更新：陳不重新整理就看到小安新增的「錦市場午餐」");
+
+// 行程內搜尋
+await page.getByRole("button", { name: "搜尋這趟行程" }).click();
+await page.getByRole("searchbox", { name: "搜尋這趟行程" }).fill("PT-0312");
+await page.getByRole("dialog", { name: "搜尋這趟行程" }).getByText("先斗町").first().waitFor();
+log("搜尋訂位代號 PT-0312 找到先斗町");
+await page.keyboard.press("Escape");
+
+// 今日頁（手機）＋快速筆記
+await page.setViewportSize({ width: 390, height: 844 });
+await page.goto(`${WEB}/trips/${tripId}/today`);
+await page.getByRole("heading", { name: /Day 1/ }).waitFor();
+await page.getByRole("button", { name: "新增快速筆記" }).click();
+await page.getByLabel("筆記內容").fill("清水寺的楓葉正紅");
+await page.getByRole("button", { name: "記下" }).click();
+await page.getByText("清水寺的楓葉正紅").waitFor();
+await page.screenshot({ path: out("08-today"), fullPage: true });
+log("今日頁：顯示 Day 1 並新增筆記");
+
+// 離線：service worker 提供頁面，資料來自離線快照
+await page.waitForTimeout(1500); // 讓 service worker 啟用並快取頁面
+await page.reload();
+await page.getByText("清水寺的楓葉正紅").waitFor();
+await page.context().setOffline(true);
+await page.reload();
+await page.getByText(/離線中/).waitFor({ timeout: 10000 });
+await page.getByText("清水寺的楓葉正紅").waitFor();
+await page.screenshot({ path: out("09-today-offline"), fullPage: true });
+log("離線：今日頁仍可開啟，顯示離線徽章與筆記");
+await page.context().setOffline(false);
+await page.setViewportSize({ width: 1440, height: 1000 });
+
+// ---- M3：附件（訂位憑證）
+await page.goto(tripUrl);
+await page
+  .getByRole("button", { name: /先斗町/ })
+  .first()
+  .click();
+const itemDlg = page.getByRole("dialog", { name: "行程點" });
+await itemDlg.getByLabel("選擇要上傳的檔案").setInputFiles({
+  name: "先斗町訂位確認.pdf",
+  mimeType: "application/pdf",
+  buffer: Buffer.from("%PDF-1.4\n% travelog e2e\n"),
+});
+await page.getByText("已上傳「先斗町訂位確認.pdf」").waitFor();
+await itemDlg.getByRole("button", { name: "先斗町訂位確認.pdf", exact: true }).waitFor();
+await page.screenshot({ path: out("13-attachment") });
+const [popup] = await Promise.all([
+  page.waitForEvent("popup"),
+  itemDlg.getByRole("button", { name: "先斗町訂位確認.pdf", exact: true }).click(),
+]);
+// 先開空白視窗再導向簽章網址（避免被擋彈出視窗）
+await popup.waitForURL(/\/v1\/local-storage\//).catch(() => fail("附件沒有導向簽章網址"));
+log("附件：上傳後可開啟短效簽章網址");
+await popup.close();
+await itemDlg.getByRole("button", { name: "關閉" }).click();
+
+// ---- M3／M6：心得、筆記轉心得、公開遊記
+await page.getByRole("link", { name: "心得" }).click();
+await page.getByRole("heading", { name: "心得" }).waitFor();
+const day1 = page.getByRole("region", { name: /^Day 1/ });
+await day1.getByRole("button", { name: "把 1 則筆記加進心得" }).click();
+await page.getByText("已把 1 則筆記加進心得").waitFor();
+await day1.getByText("清水寺的楓葉正紅").waitFor();
+log("筆記轉心得：今日頁的筆記併入 Day 1 心得");
+await day1.getByRole("button", { name: "編輯" }).click();
+const editor = day1.getByRole("textbox", { name: "心得內容" });
+await editor.click();
+await page.keyboard.press("End");
+await page.keyboard.press("Control+End");
+await page.keyboard.press("Enter");
+await page.keyboard.type("傍晚的鴨川很美，");
+await page.keyboard.press("Control+b");
+await page.keyboard.type("一定要再來");
+await day1.getByLabel(/放進公開遊記/).check();
+await day1.getByRole("button", { name: "儲存" }).click();
+await page.getByText("已儲存").waitFor();
+await day1.getByText("公開", { exact: true }).waitFor();
+await day1.locator("strong", { hasText: "一定要再來" }).waitFor();
+await page.screenshot({ path: out("14-journal"), fullPage: true });
+log("心得：編輯器粗體與公開設定已儲存");
+
+await page.getByRole("button", { name: "建立分享連結" }).click();
+await page.getByText("已建立分享連結").waitFor();
+const shareUrl = (await page.locator("span.font-mono").first().textContent())?.trim();
+const anon = await browser.newContext({ locale: "zh-TW", viewport: { width: 390, height: 844 } });
+const pub = await anon.newPage();
+await pub.goto(shareUrl);
+await pub.getByRole("heading", { name: "京都秋楓之旅" }).waitFor();
+await pub.getByText("一定要再來").waitFor();
+const pubText = (await pub.locator("body").textContent()) ?? "";
+await pub.screenshot({ path: out("15-public"), fullPage: true });
+for (const secret of ["PT-0312", "先斗町訂位確認.pdf"]) {
+  if (pubText.includes(secret)) fail(`公開遊記不應出現 ${secret}`);
+}
+log("公開遊記：未登入可看，訂位代號與附件不公開");
+await anon.close();
+
+// ---- M5：MCP 授權
+const reg = await (
+  await fetch(`${API}/oauth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_name: "E2E 助理", redirect_uris: ["http://127.0.0.1:9/cb"] }),
+  })
+).json();
+const { createHash, randomBytes } = await import("node:crypto");
+const verifier = randomBytes(32).toString("base64url");
+const qs = new URLSearchParams({
+  response_type: "code",
+  client_id: reg.client_id,
+  redirect_uri: "http://127.0.0.1:9/cb",
+  scope: "trips:read trips:write",
+  state: "s1",
+  code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+  code_challenge_method: "S256",
+  resource: `${API}/mcp`,
+});
+let callback;
+await page.route("http://127.0.0.1:9/**", (r) => {
+  callback = new URL(r.request().url());
+  return r.fulfill({ body: "ok" });
+});
+await page.goto(`${API}/oauth/authorize?${qs}`);
+await page.getByRole("heading", { name: /E2E 助理 想要存取/ }).waitFor();
+await page.screenshot({ path: out("10-consent") });
+await page.getByRole("button", { name: "允許" }).click();
+await page.waitForURL("http://127.0.0.1:9/**");
+const tok = await (
+  await fetch(`${API}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: callback.searchParams.get("code"),
+      client_id: reg.client_id,
+      redirect_uri: "http://127.0.0.1:9/cb",
+      code_verifier: verifier,
+    }),
+  })
+).json();
+log("同意頁授權完成，取得 scope", tok.scope);
+
+let rpcId = 0;
+async function mcp(method, params) {
+  const res = await fetch(`${API}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tok.access_token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params }),
+  });
+  return res.json();
+}
+await mcp("initialize", {
+  protocolVersion: "2025-06-18",
+  capabilities: {},
+  clientInfo: { name: "e2e", version: "1" },
+});
+const added = await mcp("tools/call", {
+  name: "add_itinerary_item",
+  arguments: { tripId, day: 2, title: "MCP 加的嵐山散步", type: "sight" },
+});
+if (added.result?.isError || added.error) fail(`MCP 新增失敗：${JSON.stringify(added)}`);
+log("MCP 新增行程點");
+
+// 成員頁：活動紀錄標示 MCP，可以一鍵復原
+await page.goto(`${tripUrl}/members`);
+const mcpRow = page
+  .locator("div", { hasText: "MCP 加的嵐山散步" })
+  .filter({ has: page.getByRole("button", { name: "復原" }) })
+  .last();
+await mcpRow.waitFor();
+page.once("dialog", (d) => d.accept());
+await mcpRow.getByRole("button", { name: "復原" }).click();
+await page.getByText("已復原", { exact: true }).first().waitFor();
+await page
+  .getByText(/・已復原/)
+  .first()
+  .waitFor();
+await page.screenshot({ path: out("11-undo") });
+log("復原 MCP 的新增");
+await page.goto(tripUrl);
+await page.locator("ol > li").first().waitFor();
+await page
+  .getByRole("button", { name: /Day 2/ })
+  .first()
+  .click()
+  .catch(() => {});
+await page.waitForTimeout(500);
+if (await page.getByText("MCP 加的嵐山散步").count()) fail("復原後行程點應該被刪除");
+
+// 設定：已連結的工具，撤銷後 MCP 立即失效
+await page.goto(`${WEB}/settings`);
+await page.getByText("E2E 助理").waitFor();
+await page.screenshot({ path: out("12-settings"), fullPage: true });
+page.once("dialog", (d) => d.accept());
+await page.getByRole("button", { name: "撤銷" }).click();
+await page.getByText("還沒有連結任何工具。").waitFor();
+const afterRevoke = await fetch(`${API}/mcp`, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${tok.access_token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+  },
+  body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/list" }),
+});
+log("撤銷後呼叫 MCP 的狀態碼", afterRevoke.status);
+if (afterRevoke.status !== 401) fail("撤銷後 MCP 應回 401");
+
 // 401 為未登入時的 refresh 檢查；字型與 Google 服務在離線環境會連不上
 const unexpected = errors.filter(
-  (e) => !/auth\/refresh|ERR_CONNECTION_REFUSED|fonts\.g/.test(e) && !/status of 401/.test(e),
+  (e) =>
+    !/auth\/refresh|ERR_CONNECTION_REFUSED|ERR_INTERNET_DISCONNECTED|fonts\.g|favicon\.ico|127\.0\.0\.1:9/.test(
+      e,
+    ) && !/status of 401/.test(e),
 );
 console.log("\n非預期錯誤：", unexpected.length ? unexpected : "無");
 if (unexpected.some((e) => /HTTP 5\d\d|pageerror/.test(e))) fail("有伺服器錯誤或頁面例外");

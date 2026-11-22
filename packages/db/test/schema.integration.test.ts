@@ -25,7 +25,10 @@ describe.skipIf(!url)("資料庫 schema 與確定行程點防線", () => {
   beforeAll(async () => {
     await sql.unsafe("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
     await sql.unsafe("DROP SCHEMA IF EXISTS drizzle CASCADE;");
-    await migrate(drizzle(sql), { migrationsFolder });
+    // drizzle 會改掉 client 的日期序列化設定，所以 migration 用另一條連線
+    const m = postgres(url ?? "", { max: 1, onnotice: () => {} });
+    await migrate(drizzle(m), { migrationsFolder });
+    await m.end();
 
     [{ id: userId }] = await sql`
       INSERT INTO users (display_name) VALUES ('陳') RETURNING id`;
@@ -35,7 +38,7 @@ describe.skipIf(!url)("資料庫 schema 與確定行程點防線", () => {
       RETURNING id`;
     [{ id: dayId }] = await sql`
       INSERT INTO trip_days (trip_id, date) VALUES (${tripId}, '2026-12-03') RETURNING id`;
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await sql.end();

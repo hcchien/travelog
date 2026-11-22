@@ -8,6 +8,9 @@
  *   pnpm --filter @travelog/api sandbox
  */
 
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
@@ -21,8 +24,10 @@ import { createApp } from "../src/app.js";
 import type { GoogleAuth } from "../src/auth/google.js";
 import { TokenService } from "../src/auth/tokens.js";
 import { loadConfig } from "../src/config.js";
+import { TRIP_EVENTS_CHANNEL, TripEvents } from "../src/lib/events.js";
 import { consoleMailer } from "../src/lib/mailer.js";
 import { unauthorized } from "../src/lib/problem.js";
+import { createLocalStorage } from "../src/lib/storage.js";
 import { createFakePlaces } from "../test/fake-places.js";
 
 if (process.env.NODE_ENV === "production") {
@@ -49,6 +54,13 @@ await migrate(drizzle(pg), { migrationsFolder });
 const db = drizzle(pg, { schema }) as unknown as Database;
 const now = () => new Date();
 const tokens = await TokenService.create(db, config, now);
+const storage = createLocalStorage({
+  dir: await mkdtemp(join(tmpdir(), "travelog-sandbox-")),
+  apiOrigin: API_ORIGIN,
+  secret: config.cookieSecret,
+});
+const events = new TripEvents();
+await pg.listen(TRIP_EVENTS_CHANNEL, (payload) => events.dispatch(payload));
 
 const escapeHtml = (s: string) =>
   s.replace(
@@ -101,6 +113,8 @@ app.route(
     google,
     places: createFakePlaces().provider,
     mailer: consoleMailer,
+    storage,
+    events,
     now,
   }),
 );

@@ -45,6 +45,7 @@ export interface Trip {
   ownerId: string;
   version: number;
   myRole: TripRole;
+  viewerCanWriteJournal?: boolean;
 }
 
 export interface TripDay {
@@ -149,7 +150,9 @@ export interface Invitation {
 export interface Activity {
   id: string;
   action: string;
-  via: "web" | "app" | "mcp" | "ai_assistant";
+  undoable: boolean;
+  undone: boolean;
+  via: "web" | "app" | "mcp";
   actorName: string | null;
   diff: Record<string, unknown> | null;
   createdAt: string;
@@ -161,4 +164,111 @@ export interface Passkey {
   backedUp: boolean;
   createdAt: string;
   lastUsedAt: string | null;
+}
+
+export interface Note {
+  id: string;
+  body: string;
+  takenAt: string;
+  lat: number | null;
+  lng: number | null;
+  dayId: string | null;
+  itemId: string | null;
+  mergedIntoEntryId?: string | null;
+  author: { userId: string; displayName: string | null };
+}
+
+export interface Snapshot {
+  trip: TripDetail;
+  items: Item[];
+  notes: Note[];
+  generatedAt: string;
+}
+
+export interface Connection {
+  clientId: string;
+  name: string;
+  verifiedDomain: string | null;
+  scopes: string[];
+  lastUsedAt: string;
+}
+
+export interface Attachment {
+  id: string;
+  itemId: string | null;
+  filename: string;
+  mime: string;
+  sizeBytes: number;
+  status: "pending" | "ready";
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export type JournalMark =
+  | { type: "bold" | "italic" | "strike" | "code" }
+  | { type: "link"; attrs: { href: string } };
+export interface JournalNode {
+  type: string;
+  text?: string;
+  marks?: JournalMark[];
+  attrs?: { level?: number };
+  content?: JournalNode[];
+}
+export interface JournalDoc {
+  type: "doc";
+  content: JournalNode[];
+}
+
+export interface JournalEntry {
+  id: string;
+  scope: "trip" | "day" | "item";
+  dayId: string | null;
+  itemId: string | null;
+  title: string | null;
+  body: JournalDoc;
+  bodyText: string;
+  visibility: "members" | "public";
+  version: number;
+  author: { userId: string; displayName: string | null };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ShareLink {
+  id: string;
+  slug: string;
+  url: string;
+  options: { hideLodging: boolean; journalOnly: boolean };
+  createdAt: string;
+}
+
+export interface PublicTravelogue {
+  trip: {
+    title: string;
+    startDate: string;
+    endDate: string;
+    destinations: Destination[];
+    cover: unknown;
+  };
+  options: { hideLodging: boolean; journalOnly: boolean };
+  entries: PublicEntry[];
+  days: {
+    date: string;
+    title: string | null;
+    items: {
+      id: string;
+      title: string;
+      type: string;
+      time: string | null;
+      place: { name: string } | null;
+    }[];
+    entries: PublicEntry[];
+  }[];
+}
+export interface PublicEntry {
+  id: string;
+  title: string | null;
+  body: JournalDoc;
+  author: string | null;
+  itemId: string | null;
 }

@@ -62,18 +62,10 @@ describe("can：入口限制", () => {
     expect(can(mcp, "trip.delete")).toBe(false);
   });
 
-  it("App 內 AI 只能讀，不能直接寫入", () => {
-    const ai: AccessContext = { role: "owner", via: "ai_assistant" };
-    expect(can(ai, "trip.view")).toBe(true);
-    expect(can(ai, "item.create")).toBe(false);
-    expect(can(ai, "item.update")).toBe(false);
-    expect(can(ai, "ai.applyProposal")).toBe(false);
-  });
-
-  it("套用 AI 提案必須是第一方 client 的編輯者以上", () => {
-    expect(can({ role: "editor", via: "app" }, "ai.applyProposal")).toBe(true);
-    expect(can({ role: "viewer", via: "web" }, "ai.applyProposal")).toBe(false);
-    expect(can({ role: "viewer", via: "web" }, "ai.chat")).toBe(true);
+  it("復原 MCP 修改：編輯者以上、只限第一方 client", () => {
+    expect(can({ role: "editor", via: "web" }, "activity.undo")).toBe(true);
+    expect(can({ role: "viewer", via: "web" }, "activity.undo")).toBe(false);
+    expect(can({ role: "owner", via: "mcp" }, "activity.undo")).toBe(false);
   });
 });
 

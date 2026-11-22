@@ -29,6 +29,48 @@
       "when": 1795277103554,
       "tag": "0003_auth_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795314027374,
+      "tag": "0004_remove_ai_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795314061771,
+      "tag": "0005_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795314061988,
+      "tag": "0006_trip_events_notify",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795314255557,
+      "tag": "0007_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795316220563,
+      "tag": "0008_journal_share",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795317580647,
+      "tag": "0009_push_and_note_keys",
+      "breakpoints": true
     }
   ]
 }

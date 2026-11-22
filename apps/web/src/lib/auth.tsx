@@ -4,10 +4,21 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { API_ORIGIN, api, refreshAccessToken, setAccessToken } from "./api";
+import {
+  API_ORIGIN,
+  api,
+  getAccessToken,
+  lastRefreshOffline,
+  refreshAccessToken,
+  setAccessToken,
+} from "./api";
+import { bindTokenGetter } from "./live";
 import type { Me } from "./types";
 
-type Status = "loading" | "authenticated" | "anonymous";
+type Status = "loading" | "authenticated" | "anonymous" | "offline";
+
+bindTokenGetter(getAccessToken);
+const ME_KEY = "travelog:me";
 
 interface AuthContextValue {
   status: Status;
@@ -27,8 +38,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadMe = useCallback(async () => {
     try {
-      setMe(await api<Me>("GET", "/v1/me"));
+      const m = await api<Me>("GET", "/v1/me");
+      setMe(m);
       setStatus("authenticated");
+      try {
+        localStorage.setItem(ME_KEY, JSON.stringify(m));
+      } catch {}
     } catch {
       setMe(null);
       setStatus("anonymous");
@@ -38,6 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const reload = useCallback(async () => {
     const token = await refreshAccessToken();
     if (!token) {
+      // 沒有網路時，用上次的使用者資料進入離線模式
+      const cached = lastRefreshOffline ? localStorage.getItem(ME_KEY) : null;
+      if (cached) {
+        setMe(JSON.parse(cached) as Me);
+        setStatus("offline");
+        return;
+      }
       setMe(null);
       setStatus("anonymous");
       return;
@@ -72,6 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMe(null);
     setStatus("anonymous");
     queryClient.clear();
+    try {
+      for (const k of Object.keys(localStorage))
+        if (k.startsWith("travelog:")) localStorage.removeItem(k);
+    } catch {}
   }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
@@ -95,14 +121,28 @@ export function useAuth() {
   return ctx;
 }
 
-/** 需要登入的頁面：未登入時導到登入頁，登入後回到原頁。 */
-export function RequireAuth({ children }: { children: React.ReactNode }) {
+/** 需要登入的頁面：未登入時導到登入頁，登入後回到原頁。offlineOk：離線時仍可顯示。 */
+export function RequireAuth({
+  children,
+  offlineOk,
+}: {
+  children: React.ReactNode;
+  offlineOk?: boolean;
+}) {
   const { status } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => {
     if (status === "anonymous") router.replace(`/login?returnTo=${encodeURIComponent(pathname)}`);
   }, [status, router, pathname]);
+  if (status === "offline") {
+    if (offlineOk) return <>{children}</>;
+    return (
+      <div className="p-10 text-center text-sm text-muted">
+        目前沒有網路。可以在行程的「今日」頁面查看已下載的行程。
+      </div>
+    );
+  }
   if (status !== "authenticated") {
     return <div className="p-10 text-center text-sm text-muted">載入中…</div>;
   }

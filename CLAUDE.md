@@ -1,6 +1,6 @@
 # Travelog — 開發指引
 
-旅程「行前規劃 → 行中查找 → 行後心得」的協作工具。Web、行動 App、MCP、App 內 AI 共用同一套 API。
+旅程「行前規劃 → 行中查找 → 行後心得」的協作工具。Web、行動 App、MCP 共用同一套 API。
 
 ## 必讀文件
 
@@ -24,15 +24,18 @@
 
 ## 目錄
 
-- `apps/` — web、api、mcp、worker、mobile（陸續建立）
-- `packages/domain` — 純商業邏輯（權限、確定行程點鎖定、城市歸類）。**不得依賴資料庫或框架**，所有入口（Web、App、MCP、AI）都必須經過這裡的規則。
+- `apps/` — `web`（Next.js）、`api`（Hono，含 MCP）、`mobile`（Expo App）
+- `packages/domain` — 純商業邏輯（權限、確定行程點鎖定、城市歸類）。**不得依賴資料庫或框架**，所有入口（Web、App、MCP）都必須經過這裡的規則。
 - `packages/db` — Drizzle schema 與 migration。改 schema 後執行 `pnpm db:generate`；
   drizzle-kit 產生的 PostGIS 欄位會漏掉 SRID，請檢查 migration 中 `geometry(point, 4326)`。
 - `packages/schema` — API 輸入的 zod schema（前端、App、MCP 共用）。
 - `apps/api` — Hono API。`createApp(deps)` 注入 db、config、tokens、google、places、mailer、now，方便測試。
 - `apps/web` — Next.js（App Router）前端，全部為 client component，以 access token 呼叫 API；
   refresh token 只存在 API 網域的 HttpOnly cookie。UI 色彩定義在 `globals.css` 的 `@theme`。
-- `packages/tools`、`packages/api-client` — 之後建立。
+- `packages/tools` — MCP 工具定義。
+- `apps/mobile` — Expo App（expo-router）。以 refresh token（SecureStore）登入；離線快取用 AsyncStorage；
+  **不要加 expo-sqlite**：drizzle-orm 的選用 peer 會把整套 Expo 裝進 API 映像檔（pnpm-workspace.yaml 有 override 擋住）。
+- `infra/terraform` — GCP dev 環境；部署流程見 `docs/DEPLOY.md`。
 
 ## 測試慣例
 
@@ -50,10 +53,14 @@
 
 - 所有資料存取都要檢查行程成員角色（`packages/domain` 的權限函式），查詢一律帶 `trip_id`。
 - 已確定（釘選）的行程點：日期、時間、時區、地點、類型、順序不能改，也不能刪除或移動；檢查在伺服器端 `assertItemMutable`，不能只靠前端。
-- MCP 與 App 內 AI 都不能確定／解除確定行程點；App 內 AI 的寫入一律先轉成提案，由使用者套用。
+- MCP 不能確定／解除確定行程點、不能邀請成員或刪除行程。App 內不內建 AI，AI 一律透過 MCP。
+- MCP 端點在 `api` 內（`/mcp`），以內部權杖呼叫 API 路由；不得把使用者的權杖轉送到其他服務。
 - 時間一律存 UTC（timestamptz）並另存 IANA 時區；顯示以事件所在地時區為準。
 - 不依 email 自動合併帳號；Passkey 只能由已登入使用者新增，不能用來註冊。
 - 機密（OAuth secret、Apple `.p8`、JWT 金鑰）只放 Secret Manager 或 `.env.local`，不得進版控。
+- 附件只透過 API 簽發的短效網址讀寫，永遠不出現在公開遊記；公開頁只輸出標示「公開」的心得與行程點名稱／時間／地點。
+- 心得內容只允許文字節點（`@travelog/schema` 的 `journalDoc`），輸出時用 `JournalBody` 轉 React 元素，不用 `dangerouslySetInnerHTML`。
+- 刪除帳號是去識別化（共同行程的資料保留），推播由 `push_dispatches` 去重，多個 API 執行個體只會送一次。
 
 ## 常用指令
 

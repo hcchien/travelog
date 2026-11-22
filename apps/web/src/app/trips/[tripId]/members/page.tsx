@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { Avatar, Button, cx, Field, Input, Select } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { RequireAuth, useAuth } from "@/lib/auth";
+import { useTripEvents } from "@/lib/live";
 import { keys, useTrip } from "@/lib/queries";
 import type { Activity, Invitation, TripRole } from "@/lib/types";
 
@@ -38,12 +39,13 @@ const ACTION_LABEL: Record<string, string> = {
   "member.left": "離開了行程",
   "member.removed": "移除了成員",
   "member.role_changed": "變更了成員身分",
+  "note.created": "新增了筆記",
+  "activity.undone": "復原了 MCP 的修改",
 };
 const VIA: Record<Activity["via"], string> = {
   web: "Web",
   app: "App",
   mcp: "MCP",
-  ai_assistant: "AI 助理",
 };
 
 function MembersPage() {
@@ -53,6 +55,7 @@ function MembersPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const trip = useTrip(tripId);
+  useTripEvents(tripId);
   const role = trip.data?.myRole;
   const canInvite = role === "owner" || role === "editor";
   const isOwner = role === "owner";
@@ -255,7 +258,7 @@ function MembersPage() {
                   <>
                     <Select
                       aria-label={`${m.displayName}的身分`}
-                      className="h-9 w-auto text-sm"
+                      className="h-9 w-auto! flex-none text-sm"
                       value={m.role}
                       disabled={busy}
                       onChange={(e) =>
@@ -274,6 +277,7 @@ function MembersPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="flex-none whitespace-nowrap"
                       disabled={busy}
                       onClick={() => {
                         if (window.confirm(`把擁有權轉移給 ${m.displayName}？你會變成編輯者。`)) {
@@ -292,6 +296,7 @@ function MembersPage() {
                     <Button
                       variant="danger"
                       size="sm"
+                      className="flex-none whitespace-nowrap"
                       disabled={busy}
                       onClick={() => {
                         if (window.confirm(`把 ${m.displayName} 移出這趟行程？`)) {
@@ -374,9 +379,7 @@ function MembersPage() {
               <span
                 className={cx(
                   "mt-0.5 flex-none rounded-md px-1.5 py-0.5 text-xs font-bold",
-                  a.via === "mcp" || a.via === "ai_assistant"
-                    ? "bg-brand-soft text-brand"
-                    : "bg-canvas text-ink-soft",
+                  a.via === "mcp" ? "bg-brand-soft text-brand" : "bg-canvas text-ink-soft",
                 )}
               >
                 {VIA[a.via]}
@@ -390,7 +393,25 @@ function MembersPage() {
                     dateStyle: "short",
                     timeStyle: "short",
                   })}
+                  {a.undone && "・已復原"}
                 </span>
+                {a.undoable && canInvite && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (window.confirm("復原這筆透過 MCP 的修改？")) {
+                        void attempt(
+                          () => api("POST", `/v1/trips/${tripId}/activity/${a.id}/undo`),
+                          "已復原",
+                        );
+                      }
+                    }}
+                    className="mt-1 text-[13px] font-semibold text-brand"
+                  >
+                    復原
+                  </button>
+                )}
               </span>
             </div>
           ))}

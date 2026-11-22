@@ -1,0 +1,5 @@
+# 複製成 dev.tfvars 後填入（*.tfvars 不進版控）
+project_id        = "your-gcp-project"
+domain            = "dev.example.com"
+github_repository = "hcchien/travelog"
+google_client_id  = "1234567890-xxxx.apps.googleusercontent.com"

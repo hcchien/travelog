@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
@@ -9,8 +12,10 @@ import { createApp } from "../src/app.js";
 import type { GoogleAuth, IdentityProfile } from "../src/auth/google.js";
 import { TokenService } from "../src/auth/tokens.js";
 import { loadConfig } from "../src/config.js";
+import { TRIP_EVENTS_CHANNEL, TripEvents } from "../src/lib/events.js";
 import type { Mailer } from "../src/lib/mailer.js";
 import { unauthorized } from "../src/lib/problem.js";
+import { createLocalStorage } from "../src/lib/storage.js";
 import { createFakePlaces } from "./fake-places.js";
 
 export const APP_ORIGIN = "http://localhost:3000";
@@ -49,7 +54,7 @@ async function freshPglite() {
   return pg;
 }
 
-export async function createTestApp() {
+export async function createTestApp(opts: { clientMetadata?: Record<string, unknown> } = {}) {
   // 每個測試檔各自一個記憶體資料庫
   const pg = await freshPglite();
   const db = drizzle(pg, { schema }) as unknown as Database;
@@ -64,13 +69,30 @@ export async function createTestApp() {
       sentMail.push(m);
     },
   };
+  const storageDir = await mkdtemp(join(tmpdir(), "travelog-test-"));
+  const storage = createLocalStorage({
+    dir: storageDir,
+    apiOrigin: config.apiOrigin,
+    secret: config.cookieSecret,
+    now: () => clock,
+  });
+  const events = new TripEvents();
+  await pg.listen(TRIP_EVENTS_CHANNEL, (payload) => events.dispatch(payload));
   const app = createApp({
     db,
     config,
     tokens,
+    events,
+    sseHeartbeatMs: 200,
+    fetchClientMetadata: async (url: string) => {
+      const doc = opts.clientMetadata?.[url];
+      if (!doc) throw new Error(`no metadata for ${url}`);
+      return doc;
+    },
     google: fakeGoogle,
     places: places.provider,
     mailer,
+    storage,
     now,
   });
 
@@ -119,7 +141,11 @@ export async function createTestApp() {
     pg,
     config,
     placeCalls: places.calls,
+    tokens,
+    events,
     sentMail,
+    storage,
+    storageDir,
     request,
     login,
     advance(ms: number) {

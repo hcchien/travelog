@@ -1,0 +1,21 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_BUNDLE_ID": "app.travelog.dev" }
+    },
+    "dev": {
+      "distribution": "internal",
+      "channel": "dev",
+      "env": { "APP_BUNDLE_ID": "app.travelog.dev" }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "env": { "APP_BUNDLE_ID": "app.travelog" }
+    }
+  },
+  "submit": { "production": {} }
+}

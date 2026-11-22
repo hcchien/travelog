@@ -63,3 +63,28 @@ export const webauthnCredentials = pgTable(
   },
   (t) => [index().on(t.userId)],
 );
+
+/** App 推播的裝置權杖（Expo Push）。 */
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    platform: text("platform").notNull(),
+    createdAt: createdAt(),
+    lastSeenAt: tstz("last_seen_at").notNull().defaultNow(),
+  },
+  (t) => [index().on(t.userId)],
+);
+
+/**
+ * 推播去重與節流：每個 API 執行個體都會收到同一個事件，
+ * 由先寫入（或在節流時間外更新）這張表的執行個體負責送出。
+ */
+export const pushDispatches = pgTable("push_dispatches", {
+  key: text("key").primaryKey(),
+  sentAt: tstz("sent_at").notNull(),
+});
