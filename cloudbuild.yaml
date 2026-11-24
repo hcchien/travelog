@@ -35,6 +35,10 @@ steps:
       - -c
       - |
         set -euo pipefail
+        if [ -z "${_NEXT_PUBLIC_GOOGLE_MAPS_KEY}" ]; then
+          echo "Missing Maps browser key: set _NEXT_PUBLIC_GOOGLE_MAPS_KEY in the Cloud Build trigger or submission."
+          exit 1
+        fi
         TAG="${SHORT_SHA:-${_TAG}}"
         docker pull "${_REGISTRY}/web:latest" || true
         docker build \
@@ -187,7 +191,8 @@ substitutions:
   _GOOGLE_CLIENT_ID: 448719938843-olavo04750hcvs4aag3o0qmui6m5b5mg.apps.googleusercontent.com
   _GOOGLE_NATIVE_CLIENT_IDS: ""
   _MAIL_FROM: "Travelog <onboarding@resend.dev>"
-  _NEXT_PUBLIC_GOOGLE_MAPS_KEY: AIzaSyASPUrqcSEXMgrJPJPgmpOTDn-M6o8mwdw
+  # Supply the restricted replacement key through the Cloud Build trigger/submission.
+  _NEXT_PUBLIC_GOOGLE_MAPS_KEY: ""
   _NEXT_PUBLIC_GOOGLE_MAP_ID: DEMO_MAP_ID
   _MAX_INSTANCES: "3"
   _API_SERVICE_ACCOUNT: travelog-dev-api@reviz-500908.iam.gserviceaccount.com
