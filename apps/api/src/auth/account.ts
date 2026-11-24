@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv, Deps } from "../context.js";
+import { drainStorageDeletions } from "../lib/maintenance.js";
 import { requireAuth } from "../lib/middleware.js";
 import { ApiError } from "../lib/problem.js";
 import { validate } from "../lib/validate.js";
@@ -27,7 +28,7 @@ export const DELETED_USER_NAME = "已刪除的使用者";
  */
 export function accountRoutes(deps: Deps) {
   const app = new Hono<AppEnv>();
-  const { db, now, storage } = deps;
+  const { db, now } = deps;
   const auth = requireAuth(deps);
 
   app.delete("/v1/me", auth, validate("json", deleteAccountInput), async (c) => {
@@ -35,7 +36,8 @@ export function accountRoutes(deps: Deps) {
     if (!FIRST_PARTY_CHANNELS.has(me.via))
       throw new ApiError(403, "/problems/forbidden", "只能在 Travelog 網站或 App 刪除帳號");
 
-    const orphanKeys = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
+      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, me.userId)).for("update");
       const owned = await tx
         .select({ id: schema.trips.id })
         .from(schema.trips)
@@ -77,14 +79,6 @@ export function accountRoutes(deps: Deps) {
         });
       }
 
-      const keys = toDelete.length
-        ? (
-            await tx
-              .select({ key: schema.attachments.storageKey })
-              .from(schema.attachments)
-              .where(inArray(schema.attachments.tripId, toDelete))
-          ).map((r) => r.key)
-        : [];
       if (toDelete.length) await tx.delete(schema.trips).where(inArray(schema.trips.id, toDelete));
 
       await tx.delete(schema.notes).where(eq(schema.notes.authorId, me.userId));
@@ -100,6 +94,7 @@ export function accountRoutes(deps: Deps) {
       await tx
         .delete(schema.webauthnChallenges)
         .where(eq(schema.webauthnChallenges.userId, me.userId));
+      await tx.delete(schema.browserAuthStates).where(eq(schema.browserAuthStates.userId, me.userId));
       await tx.delete(schema.oauthRequests).where(eq(schema.oauthRequests.userId, me.userId));
       // TODO(Apple 登入上線時)：先用 providerRefreshTokenEnc 呼叫 Apple /auth/revoke
       await tx.delete(schema.userIdentities).where(eq(schema.userIdentities.userId, me.userId));
@@ -113,15 +108,9 @@ export function accountRoutes(deps: Deps) {
           updatedAt: now(),
         })
         .where(eq(schema.users.id, me.userId));
-      return keys;
     });
 
-    // 交易完成後才刪檔案；失敗只記錄（物件不會再被任何資料指到）
-    await Promise.all(
-      orphanKeys.map((k) =>
-        storage.remove(k).catch((err: unknown) => console.error("[account] 刪除附件失敗", k, err)),
-      ),
-    );
+    await drainStorageDeletions(deps);
     return c.body(null, 204);
   });
 

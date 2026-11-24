@@ -8,7 +8,7 @@ import { isFirstParty } from "../auth/tokens.js";
 import type { AppEnv, Deps } from "../context.js";
 import { randomToken, sha256 } from "../lib/crypto.js";
 import { requireAuth } from "../lib/middleware.js";
-import { ApiError, conflict, notFound } from "../lib/problem.js";
+import { ApiError, conflict, notFound, unauthorized } from "../lib/problem.js";
 import { validate } from "../lib/validate.js";
 import {
   clientMetadata,
@@ -199,28 +199,26 @@ export function oauthRoutes(deps: Deps) {
     if (req.state) redirect.searchParams.set("state", req.state);
     redirect.searchParams.set("iss", issuer);
 
-    if (!approve) {
-      await db
-        .update(schema.oauthRequests)
-        .set({ status: "denied" })
-        .where(eq(schema.oauthRequests.id, req.id));
-      redirect.searchParams.set("error", "access_denied");
-      return c.json({ redirectTo: redirect.toString() });
-    }
     const requested = parseScopes(req.scope);
     const granted: OAuthScope[] = scopes ? requested.filter((s) => scopes.includes(s)) : requested;
     if (!granted.includes("trips:read")) granted.unshift("trips:read");
     const code = randomToken(32);
-    await db
-      .update(schema.oauthRequests)
-      .set({
-        status: "approved",
-        userId: me.userId,
-        grantedScope: granted.join(" "),
-        codeHash: sha256(code),
-        codeExpiresAt: new Date(now().getTime() + CODE_TTL_MS),
-      })
-      .where(eq(schema.oauthRequests.id, req.id));
+    await db.transaction(async (tx) => {
+      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, me.userId)).for("update");
+      if (!user || user.deletedAt) throw unauthorized();
+      const [decision] = await tx.update(schema.oauthRequests).set(approve ? {
+        status: "approved", userId: me.userId, grantedScope: granted.join(" "),
+        codeHash: sha256(code), codeExpiresAt: new Date(now().getTime() + CODE_TTL_MS),
+      } : { status: "denied", userId: me.userId }).where(and(
+        eq(schema.oauthRequests.id, req.id), eq(schema.oauthRequests.status, "pending"),
+        gt(schema.oauthRequests.expiresAt, now()),
+      )).returning({ id: schema.oauthRequests.id });
+      if (!decision) throw conflict("授權請求已處理或過期");
+    });
+    if (!approve) {
+      redirect.searchParams.set("error", "access_denied");
+      return c.json({ redirectTo: redirect.toString() });
+    }
     redirect.searchParams.set("code", code);
     return c.json({ redirectTo: redirect.toString() });
   });

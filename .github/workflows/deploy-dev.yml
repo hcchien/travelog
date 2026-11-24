@@ -72,6 +72,9 @@ jobs:
           gcloud run jobs update "${PREFIX}-migrate" --region "$REGION" --image "${REGISTRY}/api:${TAG}" --quiet
           gcloud run jobs execute "${PREFIX}-migrate" --region "$REGION" --wait
 
+      - name: 更新清理工作
+        run: gcloud run jobs update "${PREFIX}-maintenance" --region "$REGION" --image "${REGISTRY}/api:${TAG}" --quiet
+
       - name: 部署 API
         run: gcloud run deploy "${PREFIX}-api" --region "$REGION" --image "${REGISTRY}/api:${TAG}" --quiet
 

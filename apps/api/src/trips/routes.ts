@@ -2,6 +2,7 @@ import { schema, type Transaction } from "@travelog/db";
 import { assertCan } from "@travelog/domain";
 import { createTripInput, updateTripInput } from "@travelog/schema";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { drainStorageDeletions } from "../lib/maintenance.js";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context.js";
 import { requireAuth } from "../lib/middleware.js";
@@ -112,10 +113,10 @@ export function tripRoutes(deps: Deps) {
 
       const startDate = input.startDate ?? trip.startDate;
       const endDate = input.endDate ?? trip.endDate;
-      if (endDate < startDate) throw conflict("結束日期不能早於開始日期");
+      const dates = datesBetween(startDate, endDate);
 
       if (startDate !== trip.startDate || endDate !== trip.endDate) {
-        await syncDays(tx, trip.id, datesBetween(startDate, endDate));
+        await syncDays(tx, trip.id, dates);
       }
 
       const [row] = await tx
@@ -143,6 +144,7 @@ export function tripRoutes(deps: Deps) {
     const { trip, ctx } = await loadTrip(db, c.req.param("tripId"), c.get("auth"));
     assertCan(ctx, "trip.delete");
     await db.delete(schema.trips).where(eq(schema.trips.id, trip.id));
+    await drainStorageDeletions(deps);
     return c.body(null, 204);
   });
 

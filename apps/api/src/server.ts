@@ -5,6 +5,7 @@ import { createGoogleAuth } from "./auth/google.js";
 import { TokenService } from "./auth/tokens.js";
 import { loadConfig } from "./config.js";
 import { TRIP_EVENTS_CHANNEL, TripEvents } from "./lib/events.js";
+import { maintenance } from "./lib/maintenance.js";
 import { createMailer } from "./lib/mailer.js";
 import { expoPush, startPushNotifier } from "./lib/push.js";
 import { createGcsStorage, createLocalStorage } from "./lib/storage.js";
@@ -46,11 +47,24 @@ const app = createApp({
 // App 推播：多個執行個體都會收到事件，由 push_dispatches 去重
 startPushNotifier({ db, events, sender: expoPush(), now });
 
+let maintaining = false;
+const maintain = async () => {
+  if (maintaining) return;
+  maintaining = true;
+  try { await maintenance({ db, storage, now }); }
+  catch { console.error("maintenance failed; will retry"); }
+  finally { maintaining = false; }
+};
+void maintain();
+const maintenanceTimer = setInterval(() => void maintain(), 60_000);
+maintenanceTimer.unref();
+
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`Travelog API listening on http://localhost:${info.port}`);
 });
 
 const shutdown = () => {
+  clearInterval(maintenanceTimer);
   server.close();
   void sql.end({ timeout: 5 });
 };

@@ -9,8 +9,8 @@ export interface Mailer {
 }
 
 export const consoleMailer: Mailer = {
-  async sendInvitation({ to, tripTitle, url }) {
-    console.info(`[mailer] 邀請信（未設定 RESEND_API_KEY，只記錄）→ ${to}：${tripTitle} ${url}`);
+  async sendInvitation() {
+    console.info("[mailer] invitation delivery skipped: provider not configured");
   },
 };
 
@@ -46,7 +46,7 @@ export function resendMailer(opts: { apiKey: string; from: string; fetch?: typeo
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok)
-        throw new Error(`Resend 回應 ${res.status}：${(await res.text()).slice(0, 200)}`);
+        throw new Error(`Resend 回應 ${res.status}`);
     },
   };
 }

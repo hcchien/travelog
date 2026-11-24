@@ -82,3 +82,10 @@ export const oauthRequests = pgTable(
   },
   (t) => [index().on(t.clientId)],
 );
+
+/** Browser-bound Google transactions. Deleting a row atomically consumes its state. */
+export const browserAuthStates = pgTable("browser_auth_states", {
+  stateHash: text("state_hash").primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: tstz("expires_at").notNull(),
+});

@@ -41,7 +41,7 @@ export const trips = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("trips_date_range", sql`${t.endDate} >= ${t.startDate}`), index().on(t.ownerId)],
+  (t) => [check("trips_date_range", sql`${t.endDate} >= ${t.startDate} AND ${t.endDate} - ${t.startDate} < 60`), index().on(t.ownerId)],
 );
 
 export const tripMembers = pgTable(

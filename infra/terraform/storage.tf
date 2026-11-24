@@ -10,7 +10,7 @@ resource "google_storage_bucket" "attachments" {
   cors {
     origin          = [local.app_origin]
     method          = ["PUT", "GET"]
-    response_header = ["Content-Type", "x-goog-content-length-range"]
+    response_header = ["Content-Type", "x-goog-content-length-range", "x-goog-if-generation-match"]
     max_age_seconds = 3600
   }
 

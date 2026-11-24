@@ -1,24 +1,27 @@
 import Storage from "@react-native-async-storage/async-storage";
+import { sameSession, sessionScope } from "./session";
 
-/** 本機快取（AsyncStorage）：離線時讀取。不用 expo-sqlite，避免 drizzle-orm 的選用 peer 把 Expo 拉進 API 映像檔。 */
-export async function readJson<T>(key: string): Promise<T | null> {
+type Scope = ReturnType<typeof sessionScope>;
+const keyFor = (key: string, scope: Scope) => key === "me" ? "travelog:me" : `travelog:${scope.userId ?? "anonymous"}:${key}`;
+let writes: Promise<unknown> = Promise.resolve();
+function ordered<T>(action: () => Promise<T>): Promise<T> {
+  const work = writes.then(action, action);
+  writes = work.catch(() => {});
+  return work;
+}
+export async function readJson<T>(key: string, scope = sessionScope()): Promise<T | null> {
   try {
-    const raw = await Storage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
+    await writes;
+    const raw = await Storage.getItem(keyFor(key, scope));
+    return sameSession(scope) && raw ? JSON.parse(raw) as T : null;
+  } catch { return null; }
 }
-
-export async function writeJson(key: string, value: unknown) {
-  await Storage.setItem(key, JSON.stringify(value));
+export async function writeJson(key: string, value: unknown, scope = sessionScope()) {
+  await ordered(async () => {
+    if (sameSession(scope)) await Storage.setItem(keyFor(key, scope), JSON.stringify(value));
+  });
 }
-
-export async function removeKey(key: string) {
-  await Storage.removeItem(key);
+export async function removeKey(key: string, scope = sessionScope()) {
+  await ordered(() => Storage.removeItem(keyFor(key, scope)));
 }
-
-/** 登出時清除所有快取。 */
-export async function clearAll() {
-  await Storage.clear();
-}
+export async function clearAll() { await ordered(() => Storage.clear()); }

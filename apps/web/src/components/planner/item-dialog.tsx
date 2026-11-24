@@ -1,10 +1,12 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Attachments } from "@/components/attachments";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { BOOKING_KINDS, BOOKING_STATUSES, confirmedLabel, ITEM_TYPES } from "@/lib/items";
+import { keys, useSavedForTrip } from "@/lib/queries";
 import { isoToZoned, offsetFromTaipei, zonedToIso } from "@/lib/time";
 import type {
   BookingKind,
@@ -61,7 +63,9 @@ export function ItemDialog(props: Props) {
 
 function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
   const toast = useToast();
+  const qc = useQueryClient();
   const { me } = useAuth();
+  const savedPlaces = useSavedForTrip(trip.id);
   const day = trip.days.find((d) => d.id === (item?.dayId ?? dayId));
   const date = day?.date ?? trip.startDate;
   const locked = !!item?.confirmed;
@@ -181,15 +185,43 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
       onSaved();
     });
 
-  const saveToLibrary = () =>
+  const savedEntry = place
+    ? savedPlaces.data?.find((s) => s.place.googlePlaceId === place.googlePlaceId)
+    : undefined;
+
+  const saveToLibrary = (rating?: number | null) =>
     run(async () => {
       if (!place) return;
       try {
-        await api("POST", "/v1/me/saved-places", { body: { googlePlaceId: place.googlePlaceId } });
-        toast(`已把「${place.name}」存到我的地點`);
+        await api("POST", "/v1/me/saved-places", {
+          body: {
+            googlePlaceId: place.googlePlaceId,
+            ...(rating !== undefined ? { rating } : {}),
+          },
+        });
+        void qc.invalidateQueries({ queryKey: keys.saved });
+        void qc.invalidateQueries({ queryKey: keys.savedForTrip(trip.id) });
+        toast(
+          rating != null
+            ? `已把「${place.name}」存到我的地點並評為 ${rating}★`
+            : `已把「${place.name}」存到我的地點`,
+        );
       } catch (e) {
-        if (e instanceof ApiError && e.status === 409) toast("這個地點已經在你的地點庫裡");
-        else throw e;
+        if (e instanceof ApiError && e.status === 409) {
+          const existingId = (e.body as { savedPlaceId?: string }).savedPlaceId ?? savedEntry?.id;
+          if (existingId && rating !== undefined) {
+            await api("PATCH", `/v1/me/saved-places/${existingId}`, { body: { rating } });
+            void qc.invalidateQueries({ queryKey: keys.saved });
+            void qc.invalidateQueries({ queryKey: keys.savedForTrip(trip.id) });
+            toast(
+              rating === null
+                ? `已清除「${place.name}」的評分`
+                : `已將「${place.name}」評為 ${rating}★`,
+            );
+            return;
+          }
+          toast("這個地點已經在你的地點庫裡");
+        } else throw e;
       }
     });
 
@@ -243,10 +275,49 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
       <div className="flex flex-col gap-1.5">
         <span className="text-[13px] font-semibold text-ink-soft">地點</span>
         {place ? (
-          <div className="flex items-center gap-3 rounded-lg border border-line bg-canvas px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-canvas px-3 py-2.5">
             <div className="flex min-w-0 flex-1 flex-col">
-              <strong className="text-[15px]">{place.name}</strong>
+              <div className="flex items-center gap-2">
+                <strong className="text-[15px]">{place.name}</strong>
+                {savedEntry?.rating != null && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${
+                      savedEntry.rating <= 2
+                        ? "bg-red-100 text-danger"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {savedEntry.rating <= 2
+                      ? `⚠️ ${savedEntry.rating}★ 避雷`
+                      : `${savedEntry.rating}★`}
+                  </span>
+                )}
+              </div>
               <span className="truncate text-xs text-muted">{place.address}</span>
+            </div>
+            <div className="flex items-center gap-1" role="group" aria-label="地點評分">
+              {[1, 2, 3, 4, 5].map((n) => {
+                const cur = savedEntry?.rating ?? null;
+                const active = cur !== null && n <= cur;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    disabled={busy}
+                    aria-label={`評為 ${n} 顆星`}
+                    onClick={() => saveToLibrary(cur === n ? null : n)}
+                    className={`text-base leading-none ${
+                      active
+                        ? cur !== null && cur <= 2
+                          ? "text-danger"
+                          : "text-amber-500"
+                        : "text-line-strong hover:text-amber-400"
+                    }`}
+                  >
+                    ★
+                  </button>
+                );
+              })}
             </div>
             {place.googleMapsUri && (
               <a
@@ -260,11 +331,11 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
             )}
             <button
               type="button"
-              onClick={saveToLibrary}
+              onClick={() => saveToLibrary()}
               disabled={busy}
               className="text-sm font-semibold text-brand"
             >
-              存到我的地點
+              {savedEntry ? "已收藏" : "存到我的地點"}
             </button>
             {!locked && !readOnly && (
               <button type="button" onClick={() => setPlace(null)} className="text-sm text-muted">

@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { assertSession, bindSessionUser, sessionScope } from "./session";
 import { GoogleSignin, isSuccessResponse } from "@react-native-google-signin/google-signin";
 import {
   createContext,
@@ -44,24 +46,34 @@ GoogleSignin.configure({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<Status>("loading");
   const [me, setMe] = useState<Me | null>(null);
   const [offline, setOffline] = useState(false);
 
   const loadMe = useCallback(async () => {
+    const before = sessionScope();
     const m = await api<Me>("GET", "/v1/me");
-    await writeJson(ME_KEY, m);
+    assertSession(before);
+    bindSessionUser(m.id);
+    const scope = sessionScope();
+    await writeJson(ME_KEY, m, scope);
+    assertSession(scope);
     setMe(m);
     setOffline(false);
     setStatus("signedIn");
   }, []);
 
   const reset = useCallback(async () => {
-    await clearSession();
-    await clearAll();
     setMe(null);
+    setStatus("loading");
+    const clearing = clearSession(); // Invalidates in-flight API/refresh/outbox work synchronously.
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await clearing;
+    await clearAll();
     setStatus("signedOut");
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     setSignedOutHandler(() => {
@@ -75,7 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         if (e instanceof OfflineError) {
           // 離線開啟：用上次的帳號資料，行程與今日頁讀快取
-          setMe(await readJson<Me>(ME_KEY));
+          const cached = await readJson<Me>(ME_KEY);
+          if (!cached) return setStatus("signedOut");
+          bindSessionUser(cached.id);
+          setMe(cached);
           setOffline(true);
           setStatus("signedIn");
         } else {
@@ -87,6 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const exchange = useCallback(
     async (idToken: string) => {
+      await reset();
+      const scope = sessionScope();
       const tokens = await api<{ accessToken: string; refreshToken: string }>(
         "POST",
         "/v1/auth/google/native",
@@ -95,10 +112,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           auth: false,
         },
       );
-      await saveSession(tokens);
+      assertSession(scope);
+      await saveSession(tokens, scope);
       await loadMe();
     },
-    [loadMe],
+    [loadMe, reset],
   );
 
   const value = useMemo<AuthState>(

@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Hono } from "hono";
 import { ApiError, notFound } from "./problem.js";
@@ -14,8 +14,8 @@ export interface StorageAdapter {
     file: { mime: string; size: number },
   ): Promise<{ url: string; headers: Record<string, string> }>;
   /** 物件存在時回傳大小。 */
-  stat(key: string): Promise<{ size: number } | null>;
-  signDownload(key: string, file: { filename: string; mime: string }): Promise<string>;
+  stat(key: string): Promise<{ size: number; generation: string } | null>;
+  signDownload(key: string, file: { filename: string; mime: string; generation?: string | null }): Promise<string>;
   remove(key: string): Promise<void>;
 }
 
@@ -36,13 +36,13 @@ export async function createGcsStorage(bucketName: string): Promise<StorageAdapt
   const bucket = new Storage().bucket(bucketName);
   return {
     async signUpload(key, { mime, size }) {
-      const headers = { "Content-Type": mime, "x-goog-content-length-range": `${size},${size}` };
+      const headers = { "Content-Type": mime, "x-goog-content-length-range": `${size},${size}`, "x-goog-if-generation-match": "0" };
       const [url] = await bucket.file(key).getSignedUrl({
         version: "v4",
         action: "write",
         expires: Date.now() + UPLOAD_URL_TTL_MS,
         contentType: mime,
-        extensionHeaders: { "x-goog-content-length-range": `${size},${size}` },
+        extensionHeaders: { "x-goog-content-length-range": `${size},${size}`, "x-goog-if-generation-match": "0" },
       });
       return { url, headers };
     },
@@ -50,15 +50,16 @@ export async function createGcsStorage(bucketName: string): Promise<StorageAdapt
       const [exists] = await bucket.file(key).exists();
       if (!exists) return null;
       const [meta] = await bucket.file(key).getMetadata();
-      return { size: Number(meta.size) };
+      return { size: Number(meta.size), generation: String(meta.generation) };
     },
-    async signDownload(key, { filename, mime }) {
+    async signDownload(key, { filename, mime, generation }) {
       const [url] = await bucket.file(key).getSignedUrl({
         version: "v4",
         action: "read",
         expires: Date.now() + DOWNLOAD_URL_TTL_MS,
         responseDisposition: contentDisposition(filename, mime),
         responseType: mime,
+        ...(generation ? { queryParams: { generation } } : {}),
       });
       return url;
     },
@@ -77,6 +78,7 @@ interface LocalGrant {
   mime: string;
   size?: number;
   name?: string;
+  generation?: string;
 }
 
 export function createLocalStorage(opts: {
@@ -119,13 +121,20 @@ export function createLocalStorage(opts: {
     if (body.length !== g.size) throw new ApiError(400, "/problems/bad-upload", "檔案大小不符");
     const p = pathOf(g.k);
     await mkdir(dirname(p), { recursive: true });
-    await writeFile(p, body);
+    const temporary = `${p}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, body, { flag: "wx" });
+      await link(temporary, p); // Atomic create-only publish: never expose a partially written object.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new ApiError(412, "/problems/object-exists", "上傳網址已使用");
+      throw err;
+    } finally { await rm(temporary, { force: true }); }
     return c.body(null, 200);
   });
   routes.get("/v1/local-storage/:token", async (c) => {
     const g = verify(c.req.param("token"), "get");
     const data = await readFile(pathOf(g.k)).catch(() => null);
-    if (!data) throw notFound("檔案");
+    if (!data || (g.generation && createHash("sha256").update(data).digest("hex") !== g.generation)) throw notFound("檔案");
     return c.body(data, 200, {
       "Content-Type": g.mime,
       "Content-Disposition": contentDisposition(g.name ?? "file", g.mime),
@@ -144,16 +153,17 @@ export function createLocalStorage(opts: {
       };
     },
     async stat(key) {
-      const s = await stat(pathOf(key)).catch(() => null);
-      return s ? { size: s.size } : null;
+      const data = await readFile(pathOf(key)).catch(() => null);
+      return data ? { size: data.length, generation: createHash("sha256").update(data).digest("hex") } : null;
     },
-    async signDownload(key, { filename, mime }) {
+    async signDownload(key, { filename, mime, generation }) {
       return issue({
         k: key,
         op: "get",
         exp: now().getTime() + DOWNLOAD_URL_TTL_MS,
         mime,
         name: filename,
+        ...(generation ? { generation } : {}),
       });
     },
     async remove(key) {

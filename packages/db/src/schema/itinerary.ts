@@ -121,6 +121,7 @@ export const attachments = pgTable(
       .references(() => trips.id, { onDelete: "cascade" }),
     itemId: uuid("item_id").references(() => itineraryItems.id, { onDelete: "set null" }),
     storageKey: text("storage_key").notNull().unique(),
+    storageGeneration: text("storage_generation"),
     filename: text("filename").notNull(),
     mime: text("mime").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),

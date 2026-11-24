@@ -106,7 +106,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       clientId: e.GOOGLE_CLIENT_ID,
       clientSecret: e.GOOGLE_CLIENT_SECRET,
       audiences: [e.GOOGLE_CLIENT_ID, ...e.GOOGLE_NATIVE_CLIENT_IDS],
-      redirectUri: `${new URL(e.API_ORIGIN).origin}/v1/auth/google/callback`,
+      redirectUri: `${new URL(e.APP_ORIGIN).origin}/session/google/callback`,
     },
     cookieSecret: e.COOKIE_SECRET,
     secureCookies: e.NODE_ENV === "production" || new URL(e.API_ORIGIN).protocol === "https:",

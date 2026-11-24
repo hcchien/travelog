@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-23",
+  "root": "/Users/hcchien/code/travelog/",
+  "runtime": "v26.7.0",
+  "probeGroups": 4,
+  "results": [
+    {
+      "id": "SEC-01",
+      "observed": "Unsolicited fragment overwrote an existing refresh token and removed itself from the address."
+    },
+    {
+      "id": "SEC-03",
+      "observed": "Loopback IPv4 blocked; mapped IPv6, ULA, link-local IPv6, and DNS names reached mocked fetch.",
+      "targets": [
+        "https://[::ffff:7f00:1]/client.json",
+        "https://[fc00::1]/client.json",
+        "https://[fe80::1]/client.json",
+        "https://internal.example/client.json"
+      ],
+      "limitation": "Does not demonstrate real DNS resolution, TLS trust, internal reachability, or metadata access."
+    },
+    {
+      "id": "SEC-04",
+      "observed": "A partial date update passes the predicate; datesBetween generates 91 days.",
+      "projectedDaysFor9999": 2912443,
+      "limitation": "Large date range was calculated arithmetically, not allocated or sent to a database."
+    },
+    {
+      "id": "SEC-07",
+      "observed": "Grant gate changes true -> false -> true after revocation followed by a new read-only grant for the same client.",
+      "limitation": "Uses the exact query method with mocked ORM predicates; JWT signing and the MCP HTTP route were not run."
+    }
+  ]
+}

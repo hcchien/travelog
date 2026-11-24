@@ -13,7 +13,7 @@ const ERRORS: Record<string, string> = {
 };
 
 function safeReturnTo(v: string | null) {
-  return v?.startsWith("/") && !v.startsWith("//") ? v : "/trips";
+  return v?.startsWith("/") && !v.startsWith("//") && !v.includes("\\") && !/[\u0000-\u0020\u007f]/.test(v) ? v : "/trips";
 }
 
 function LoginForm() {

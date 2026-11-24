@@ -12,7 +12,8 @@ resource "tls_private_key" "jwt" {
 
 locals {
   generated_secrets = {
-    "database-url"    = "postgres://${google_sql_user.app.name}:${random_password.db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
+    "database-url" = "postgres://travelog_runtime:${random_password.runtime_db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
+    "migration-database-url" = "postgres://${google_sql_user.app.name}:${random_password.db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
     "cookie-secret"   = random_password.cookie.result
     "jwt-private-key" = tls_private_key.jwt.private_key_pem_pkcs8
   }
@@ -54,7 +55,7 @@ resource "google_secret_manager_secret_version" "manual_placeholder" {
 }
 
 resource "google_secret_manager_secret_iam_member" "api_generated" {
-  for_each  = google_secret_manager_secret.generated
+  for_each  = { for key, secret in google_secret_manager_secret.generated : key => secret if key != "migration-database-url" }
   secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.api.email}"
@@ -65,4 +66,11 @@ resource "google_secret_manager_secret_iam_member" "api_manual" {
   secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.api.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "migration_database" {
+  for_each  = toset(["database-url", "migration-database-url"])
+  secret_id = google_secret_manager_secret.generated[each.key].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.migration.email}"
 }

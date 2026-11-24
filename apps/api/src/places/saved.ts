@@ -6,7 +6,7 @@ import {
   SAVED_PLACE_CATEGORIES,
 } from "@travelog/domain";
 import { createSavedPlaceInput, updateSavedPlaceInput } from "@travelog/schema";
-import { and, arrayContains, asc, count, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, arrayContains, asc, count, desc, eq, gte, inArray, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context.js";
 import { requireAuth } from "../lib/middleware.js";
@@ -26,6 +26,7 @@ const serializeSaved = (s: SavedRow, p: PlaceRow) => ({
   cityName: s.cityName,
   category: s.category,
   tags: s.tags,
+  rating: s.rating ?? null,
   privateNote: s.privateNote,
   place: serializePlace(p),
   createdAt: s.createdAt,
@@ -60,6 +61,7 @@ export function savedPlaceRoutes(deps: Deps) {
     const city = c.req.query("city");
     const category = c.req.query("category");
     const tag = c.req.query("tag");
+    const minRating = c.req.query("minRating");
     const tripId = c.req.query("tripId");
 
     if (city) conditions.push(eq(schema.savedPlaces.cityKey, city));
@@ -70,6 +72,12 @@ export function savedPlaceRoutes(deps: Deps) {
       conditions.push(eq(schema.savedPlaces.category, category as SavedRow["category"]));
     }
     if (tag) conditions.push(arrayContains(schema.savedPlaces.tags, [tag]));
+    if (minRating) {
+      const n = Number(minRating);
+      if (Number.isInteger(n) && n >= 1 && n <= 5) {
+        conditions.push(gte(schema.savedPlaces.rating, n));
+      }
+    }
     if (tripId) {
       // 依行程目的地篩選；必須是該行程成員
       const { trip, ctx } = await loadTrip(db, tripId, me);
@@ -84,7 +92,11 @@ export function savedPlaceRoutes(deps: Deps) {
       .from(schema.savedPlaces)
       .innerJoin(schema.places, eq(schema.places.id, schema.savedPlaces.placeId))
       .where(and(...conditions))
-      .orderBy(asc(schema.savedPlaces.cityName), desc(schema.savedPlaces.createdAt));
+      .orderBy(
+        asc(schema.savedPlaces.cityName),
+        sql`${schema.savedPlaces.rating} DESC NULLS LAST`,
+        desc(schema.savedPlaces.createdAt),
+      );
     return c.json({ items: rows.map((r) => serializeSaved(r.saved, r.place)) });
   });
 
@@ -108,6 +120,7 @@ export function savedPlaceRoutes(deps: Deps) {
         ...city,
         category: input.category ?? categoryFromPlaceTypes(meta.types ?? []),
         tags: normalizeTags(input.tags),
+        rating: input.rating ?? null,
         privateNote: input.privateNote,
       })
       .onConflictDoNothing()

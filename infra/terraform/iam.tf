@@ -74,8 +74,19 @@ resource "google_project_iam_member" "deployer_run" {
 
 # 部署時以 api／web 的身分執行
 resource "google_service_account_iam_member" "deployer_act_as" {
-  for_each           = { api = google_service_account.api.name, web = google_service_account.web.name }
+  for_each           = { api = google_service_account.api.name, web = google_service_account.web.name, migration = google_service_account.migration.name }
   service_account_id = each.value
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_service_account" "migration" {
+  account_id   = "${local.name}-migrate"
+  display_name = "Travelog ${var.env} migration"
+}
+
+resource "google_project_iam_member" "migration_sql" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.migration.email}"
 }

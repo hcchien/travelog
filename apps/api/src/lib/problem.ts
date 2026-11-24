@@ -44,7 +44,10 @@ function problem(
 }
 
 export function handleError(err: Error, c: Context) {
-  if (err instanceof ApiError) return problem(c, err.status, err.type, err.message, err.extra);
+  if (err instanceof ApiError) {
+    if (err.status === 429) c.header("Retry-After", String(err.extra.retryAfter ?? 60));
+    return problem(c, err.status, err.type, err.message, err.extra);
+  }
 
   if (err instanceof DomainError) {
     const extra: Record<string, unknown> = {};
@@ -67,6 +70,6 @@ export function handleError(err: Error, c: Context) {
       return problem(c, 409, "/problems/conflict", "資料重複");
   }
 
-  console.error(err);
+  console.error("request failed", { code: pgCode(err) ?? "internal", path: c.req.routePath });
   return problem(c, 500, "/problems/internal", "伺服器發生錯誤");
 }

@@ -4,7 +4,7 @@ export type OAuthScope = (typeof OAUTH_SCOPES)[number];
 
 export const SCOPE_LABELS: Record<OAuthScope, string> = {
   "trips:read": "讀取你的行程、想去清單、我的地點與筆記",
-  "trips:write": "新增與修改行程點、想去清單、我的地點",
+  "trips:write": "建立行程，新增與修改行程點、想去清單、我的地點",
   "journal:write": "新增筆記",
 };
 

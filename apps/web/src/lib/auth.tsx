@@ -5,8 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  API_ORIGIN,
   api,
+  bindSessionUser,
+  sessionScope,
+  sameSession,
+  SessionChangedError,
   getAccessToken,
   lastRefreshOffline,
   refreshAccessToken,
@@ -36,19 +39,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const queryClient = useQueryClient();
 
+  const reset = useCallback(async () => {
+    setAccessToken(null);
+    setMe(null);
+    setStatus("anonymous");
+    const scope = sessionScope();
+    await queryClient.cancelQueries();
+    if (!sameSession(scope)) return;
+    queryClient.clear();
+    try {
+      for (const key of Object.keys(localStorage))
+        if (key.startsWith("travelog:")) localStorage.removeItem(key);
+    } catch {}
+  }, [queryClient]);
+
   const loadMe = useCallback(async () => {
     try {
       const m = await api<Me>("GET", "/v1/me");
+      if (sessionScope().userId !== m.id) {
+        bindSessionUser(m.id);
+        const scope = sessionScope();
+        await queryClient.cancelQueries();
+        queryClient.clear();
+        if (!sameSession(scope)) return;
+      }
       setMe(m);
       setStatus("authenticated");
       try {
         localStorage.setItem(ME_KEY, JSON.stringify(m));
       } catch {}
-    } catch {
-      setMe(null);
-      setStatus("anonymous");
+    } catch (error) {
+      if (!(error instanceof SessionChangedError)) await reset();
     }
-  }, []);
+  }, [queryClient, reset]);
 
   const reload = useCallback(async () => {
     const token = await refreshAccessToken();
@@ -56,16 +79,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 沒有網路時，用上次的使用者資料進入離線模式
       const cached = lastRefreshOffline ? localStorage.getItem(ME_KEY) : null;
       if (cached) {
-        setMe(JSON.parse(cached) as Me);
+        const user = JSON.parse(cached) as Me;
+        bindSessionUser(user.id);
+        setMe(user);
         setStatus("offline");
         return;
       }
-      setMe(null);
-      setStatus("anonymous");
+      await reset();
       return;
     }
     await loadMe();
-  }, [loadMe]);
+  }, [loadMe, reset]);
 
   useEffect(() => {
     void reload();
@@ -77,28 +101,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       "/v1/auth/passkey/login/options",
     );
     const response = await startAuthentication({ optionsJSON: options });
-    const { accessToken } = await api<{ accessToken: string }>(
-      "POST",
-      "/v1/auth/passkey/login/verify",
-      {
-        body: { challengeId, client: "web", response },
-      },
-    );
+    const { accessToken } = await api<{
+      accessToken: string;
+      refreshToken?: string;
+    }>("POST", "/v1/auth/passkey/login/verify", {
+      body: { challengeId, client: "web", response },
+    });
     setAccessToken(accessToken);
     await loadMe();
   }, [loadMe]);
 
   const logout = useCallback(async () => {
-    await api("POST", "/v1/auth/logout", { body: {} }).catch(() => {});
-    setAccessToken(null);
-    setMe(null);
-    setStatus("anonymous");
-    queryClient.clear();
-    try {
-      for (const k of Object.keys(localStorage))
-        if (k.startsWith("travelog:")) localStorage.removeItem(k);
-    } catch {}
-  }, [queryClient]);
+    const logout = api("POST", "/v1/auth/logout", { body: {} }).catch(() => {});
+    await reset();
+    await logout;
+  }, [reset]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -108,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       reload,
       googleLoginUrl: (returnTo = "/trips") =>
-        `${API_ORIGIN}/v1/auth/google?returnTo=${encodeURIComponent(returnTo)}`,
+        `/session/google?returnTo=${encodeURIComponent(returnTo)}`,
     }),
     [status, me, loginWithPasskey, logout, reload],
   );

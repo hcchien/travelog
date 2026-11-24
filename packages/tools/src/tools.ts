@@ -115,6 +115,61 @@ export const TOOLS: ToolDef[] = [
   }),
 
   define({
+    name: "create_trip",
+    title: "建立行程",
+    description: "建立一趟新行程（會自動依開始與結束日期建立每一天，並將使用者設為擁有者）。",
+    scope: "trips:write",
+    readOnly: false,
+    input: {
+      title: z.string().trim().min(1).max(120).describe("行程名稱，例如「東京春遊」"),
+      startDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .describe("開始日期 YYYY-MM-DD"),
+      endDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .describe("結束日期 YYYY-MM-DD（最多 60 天）"),
+      primaryTz: z
+        .string()
+        .min(1)
+        .default("Asia/Tokyo")
+        .describe("主要 IANA 時區，例如 Asia/Tokyo、Asia/Taipei"),
+      destinations: z
+        .array(
+          z.object({
+            cityKey: z
+              .string()
+              .min(1)
+              .max(80)
+              .describe("城市 key，例如 jp-tokyo、jp-kyoto、tw-taipei"),
+            name: z.string().min(1).max(80).describe("顯示名稱，例如「東京」"),
+          }),
+        )
+        .max(20)
+        .optional()
+        .describe("目的地清單"),
+      cover: z.string().max(80).nullable().optional().describe("封面代號（選填）"),
+    },
+    async run(ctx, a) {
+      const trip = await ctx.call<TripDetail>("POST", "/v1/trips", {
+        body: {
+          title: a.title,
+          startDate: a.startDate,
+          endDate: a.endDate,
+          primaryTz: a.primaryTz,
+          destinations: a.destinations ?? [],
+          cover: a.cover ?? null,
+        },
+      });
+      return {
+        text: `已建立行程：${trip.title}（${trip.startDate} 到 ${trip.endDate}，共 ${trip.days.length} 天）id=${trip.id}`,
+        data: { trip },
+      };
+    },
+  }),
+
+  define({
     name: "get_trip",
     title: "行程概要",
     description: "取得一趟行程的概要：每一天的日期與行程點數量、目的地、時區、成員。",
@@ -451,34 +506,41 @@ export const TOOLS: ToolDef[] = [
     name: "list_saved_places",
     title: "我的地點庫",
     description:
-      "查詢使用者收藏的常去地點（依城市分類，例如東京常去的餐廳）。可依城市 key（例如 jp-tokyo）、分類，或行程（只列出該行程目的地的地點）篩選。",
+      "查詢使用者收藏的常去地點（依城市分類，含個人 1–5 星評分，1–2 星為踩雷避開、4–5 星為推薦）。可依城市 key（例如 jp-tokyo）、分類、最低評分或行程篩選。",
     scope: "trips:read",
     readOnly: true,
     input: {
       city: z.string().optional().describe("城市 key，例如 jp-tokyo、jp-kyoto、tw-taipei"),
       category: z.enum(SAVED_PLACE_CATEGORIES).optional(),
+      minRating: z.number().int().min(1).max(5).optional().describe("只列出評分 ≥ 此分數（1–5）的地點"),
       tripId: tripId.optional(),
     },
     async run(ctx, a) {
       const qs = new URLSearchParams();
       if (a.city) qs.set("city", a.city);
       if (a.category) qs.set("category", a.category);
+      if (a.minRating) qs.set("minRating", String(a.minRating));
       if (a.tripId) qs.set("tripId", a.tripId);
       const { items } = await ctx.call<{
         items: {
+          id: string;
           cityName: string;
           category: string;
           tags: string[];
+          rating: number | null;
           privateNote: string | null;
           place: Place;
         }[];
       }>("GET", `/v1/me/saved-places?${qs}`);
       const text = items.length
         ? items
-            .map(
-              (s) =>
-                `- ${s.place.name}（${s.cityName}，${s.category}${s.tags.length ? `，${s.tags.join("、")}` : ""}）${s.privateNote ? `備註：${s.privateNote}` : ""} googlePlaceId=${s.place.googlePlaceId}`,
-            )
+            .map((s) => {
+              const star =
+                s.rating != null
+                  ? `｜評分：${"★".repeat(s.rating)}${"☆".repeat(5 - s.rating)}(${s.rating}/5${s.rating <= 2 ? " 避雷" : ""})`
+                  : "";
+              return `- ${s.place.name}（${s.cityName}，${s.category}${s.tags.length ? `，${s.tags.join("、")}` : ""}）${star}${s.privateNote ? ` 備註：${s.privateNote}` : ""} googlePlaceId=${s.place.googlePlaceId}`;
+            })
             .join("\n")
         : "地點庫裡沒有符合的地點。";
       return { text, data: { items } };
@@ -487,33 +549,66 @@ export const TOOLS: ToolDef[] = [
 
   define({
     name: "save_place",
-    title: "收藏地點",
-    description: "把地點收藏到使用者的地點庫（跨行程保存，會自動依城市分類）。",
+    title: "收藏或評分地點",
+    description:
+      "把地點收藏到使用者的地點庫（跨行程保存，會自動依城市分類），或為已收藏的地點更新個人評分（1–5 顆星，1–2 星代表踩雷避開）、標籤與備註。",
     scope: "trips:write",
     readOnly: false,
     input: {
       googlePlaceId: z.string(),
       category: z.enum(SAVED_PLACE_CATEGORIES).optional(),
       tags: z.array(z.string().max(20)).max(10).optional(),
+      rating: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .nullable()
+        .optional()
+        .describe("個人評分 1–5 顆星（1–2 分為踩雷避開，4–5 分為推薦，null 為清除評分）"),
       note: z.string().max(2000).optional().describe("只有使用者自己看得到的備註"),
     },
     async run(ctx, a) {
-      const res = await ctx.call<{ cityName: string; place: Place }>(
-        "POST",
-        "/v1/me/saved-places",
-        {
-          body: {
-            googlePlaceId: a.googlePlaceId,
-            category: a.category,
-            tags: a.tags ?? [],
-            privateNote: a.note ?? null,
+      try {
+        const res = await ctx.call<{ cityName: string; rating: number | null; place: Place }>(
+          "POST",
+          "/v1/me/saved-places",
+          {
+            body: {
+              googlePlaceId: a.googlePlaceId,
+              category: a.category,
+              tags: a.tags ?? [],
+              ...(a.rating !== undefined ? { rating: a.rating } : {}),
+              privateNote: a.note ?? null,
+            },
           },
-        },
-      );
-      return {
-        text: `已收藏到「${res.cityName}」：${res.place.name}`,
-        data: res as unknown as Record<string, unknown>,
-      };
+        );
+        const star = res.rating != null ? `（${res.rating}★）` : "";
+        return {
+          text: `已收藏到「${res.cityName}」：${res.place.name}${star}`,
+          data: res as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        const existingId = (err as { body?: { savedPlaceId?: string } }).body?.savedPlaceId;
+        if (existingId && (a.rating !== undefined || a.category || a.tags || a.note !== undefined)) {
+          const patch: Record<string, unknown> = {};
+          if (a.category !== undefined) patch.category = a.category;
+          if (a.tags !== undefined) patch.tags = a.tags;
+          if (a.rating !== undefined) patch.rating = a.rating;
+          if (a.note !== undefined) patch.privateNote = a.note;
+          const res = await ctx.call<{ cityName: string; rating: number | null; place: Place }>(
+            "PATCH",
+            `/v1/me/saved-places/${existingId}`,
+            { body: patch },
+          );
+          const star = res.rating != null ? `（評分：${res.rating}★）` : "";
+          return {
+            text: `已更新「${res.cityName}」地點：${res.place.name}${star}`,
+            data: res as unknown as Record<string, unknown>,
+          };
+        }
+        throw err;
+      }
     },
   }),
 

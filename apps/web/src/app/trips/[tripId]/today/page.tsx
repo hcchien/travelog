@@ -11,7 +11,7 @@ import { api, errorMessage } from "@/lib/api";
 import { RequireAuth, useAuth } from "@/lib/auth";
 import { confirmedLabel, itemTypeMeta } from "@/lib/items";
 import { useTripEvents } from "@/lib/live";
-import { loadSnapshot, refreshSnapshot } from "@/lib/offline";
+import { loadSnapshot, snapshotWithOfflineFallback } from "@/lib/offline";
 import { formatDay, formatTime, isoToZoned } from "@/lib/time";
 import type { Item, Note, Snapshot } from "@/lib/types";
 
@@ -106,22 +106,17 @@ function QuickNote({
 
 function Today() {
   const { tripId } = useParams<{ tripId: string }>();
-  const { status } = useAuth();
+  const { status, me } = useAuth();
   const now = useNow();
   const [noting, setNoting] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const live = useTripEvents(tripId);
 
   const snap = useQuery({
-    queryKey: ["snapshot", tripId],
+    queryKey: ["snapshot", tripId, me?.id],
+    enabled: !!me,
     queryFn: async (): Promise<{ data: Snapshot; offline: boolean }> => {
-      if (status !== "offline") {
-        try {
-          return { data: await refreshSnapshot(tripId), offline: false };
-        } catch {
-          // 落到下面讀取離線資料
-        }
-      }
+      if (status !== "offline") return snapshotWithOfflineFallback(tripId);
       const cached = loadSnapshot(tripId);
       if (!cached) throw new Error("沒有離線資料");
       return { data: cached, offline: true };

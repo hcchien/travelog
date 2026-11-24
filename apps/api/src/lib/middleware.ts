@@ -1,6 +1,7 @@
 import { ForbiddenError, requiredScopeForMcp } from "@travelog/domain";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv, Deps } from "../context.js";
+import { userLimits } from "./limits.js";
 import { unauthorized } from "./problem.js";
 
 export const requireAuth = (deps: Deps) =>
@@ -18,6 +19,7 @@ export const requireAuth = (deps: Deps) =>
         );
       }
     }
+    await userLimits(deps, claims.userId, c.req.method, c.req.path);
     c.set("auth", { ...claims, via: claims.clientId });
     await next();
   });

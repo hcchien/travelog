@@ -1,4 +1,13 @@
-import { geometry, index, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  geometry,
+  index,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { createdAt, id, tstz } from "./columns.js";
 import { savedPlaceCategory } from "./enums.js";
 import { users } from "./users.js";
@@ -38,6 +47,8 @@ export const savedPlaces = pgTable(
     cityName: text("city_name").notNull(),
     category: savedPlaceCategory("category").notNull().default("other"),
     tags: text("tags").array().notNull().default([]),
+    /** 個人評分 1–5 顆星（null 表示尚未評分）。 */
+    rating: smallint("rating"),
     /** 只有本人看得到；加入行程時預設不帶入。 */
     privateNote: text("private_note"),
     createdAt: createdAt(),

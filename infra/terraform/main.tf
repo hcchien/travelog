@@ -14,6 +14,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
+    "cloudscheduler.googleapis.com",
     "secretmanager.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com",

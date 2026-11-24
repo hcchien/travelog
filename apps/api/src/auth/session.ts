@@ -18,7 +18,11 @@ export function setRefreshCookie(c: Context, config: Config, token: string) {
 }
 
 export function clearRefreshCookie(c: Context, config: Config) {
-  deleteCookie(c, REFRESH_COOKIE, { path: AUTH_PATH, secure: config.secureCookies });
+  deleteCookie(c, REFRESH_COOKIE, {
+    path: AUTH_PATH,
+    secure: config.secureCookies,
+    sameSite: "Lax",
+  });
 }
 
 export const getRefreshCookie = (c: Context) => getCookie(c, REFRESH_COOKIE);
@@ -30,6 +34,7 @@ export interface OAuthState {
   returnTo: string;
   /** 帳號連結流程：要把 Google 身分加到這個使用者。 */
   linkUserId?: string;
+  linkFamilyId?: string;
 }
 
 export async function setOAuthState(c: Context, config: Config, value: OAuthState) {
@@ -65,7 +70,7 @@ export function assertAllowedOrigin(c: Context, config: Config) {
 
 /** returnTo 只接受站內相對路徑，避免 open redirect。 */
 export function safeReturnTo(value: string | undefined): string {
-  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u0020\u007f]/.test(value)) {
     return "/";
   }
   return value;

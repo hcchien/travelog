@@ -17,12 +17,15 @@ export const resolvePlaceInput = z.object({
 
 export const savedPlaceCategory = z.enum(SAVED_PLACE_CATEGORIES);
 
+export const placeRating = z.number().int().min(1).max(5);
+
 export const createSavedPlaceInput = z.object({
   googlePlaceId,
   sessionToken: z.string().max(100).optional(),
   /** 省略時依地點類型推測。 */
   category: savedPlaceCategory.optional(),
   tags: z.array(z.string().max(40)).max(20).default([]),
+  rating: placeRating.nullable().default(null),
   privateNote: z.string().max(2000).nullable().default(null),
 });
 
@@ -30,6 +33,7 @@ export const updateSavedPlaceInput = z
   .object({
     category: savedPlaceCategory,
     tags: z.array(z.string().max(40)).max(20),
+    rating: placeRating.nullable(),
     privateNote: z.string().max(2000).nullable(),
     /** 手動調整城市歸類。 */
     cityKey: z.string().min(1).max(80),

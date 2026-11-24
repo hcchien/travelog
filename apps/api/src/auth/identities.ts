@@ -1,5 +1,6 @@
 import { type Database, schema } from "@travelog/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
+import { unauthorized } from "../lib/problem.js";
 import type { IdentityProfile } from "./google.js";
 
 /**
@@ -23,6 +24,8 @@ export async function findOrCreateUser(
       );
 
     if (existing) {
+      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, existing.userId)).for("update");
+      if (!user || user.deletedAt) throw unauthorized("帳號已失效");
       await tx
         .update(schema.userIdentities)
         .set({ email: profile.email, emailVerified: profile.emailVerified })
@@ -60,8 +63,19 @@ export async function linkIdentity(
   userId: string,
   provider: "google" | "apple",
   profile: IdentityProfile,
+  familyId: string,
+  now: Date,
 ): Promise<"linked" | "already" | "conflict"> {
-  const [existing] = await db
+  return db.transaction(async (tx) => {
+  const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).for("update");
+  if (!user || user.deletedAt) throw unauthorized();
+  const [session] = await tx.select().from(schema.refreshTokens).where(and(
+    eq(schema.refreshTokens.userId, userId), eq(schema.refreshTokens.familyId, familyId),
+    eq(schema.refreshTokens.clientId, "web"), isNull(schema.refreshTokens.revokedAt),
+    isNull(schema.refreshTokens.replacedAt), gt(schema.refreshTokens.expiresAt, now),
+  )).for("update");
+  if (!session) throw unauthorized();
+  const [existing] = await tx
     .select({ userId: schema.userIdentities.userId })
     .from(schema.userIdentities)
     .where(
@@ -71,7 +85,7 @@ export async function linkIdentity(
       ),
     );
   if (existing) return existing.userId === userId ? "already" : "conflict";
-  await db.insert(schema.userIdentities).values({
+  await tx.insert(schema.userIdentities).values({
     userId,
     provider,
     providerSub: profile.sub,
@@ -80,4 +94,5 @@ export async function linkIdentity(
     isPrivateRelay: profile.email?.endsWith("@privaterelay.appleid.com") ?? false,
   });
   return "linked";
+  });
 }

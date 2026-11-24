@@ -128,6 +128,7 @@ export interface SavedPlace {
   cityName: string;
   category: SavedCategory;
   tags: string[];
+  rating: number | null;
   privateNote: string | null;
   place: Place;
 }

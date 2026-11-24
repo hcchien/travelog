@@ -263,11 +263,15 @@ export function liveRoutes(deps: Deps) {
       let closed = false;
       const queue: string[] = [];
       let wake: (() => void) | null = null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let checkedAt = 0;
+      const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
       const unsubscribe = deps.events.subscribe(trip.id, (e) => {
+        if (queue.length >= 100) { closed = true; wake?.(); return; }
         queue.push(JSON.stringify(e));
         wake?.();
         // 被移出行程時結束連線
-        if (e.action === "member.removed" && e.targetId === me.userId) closed = true;
+        if (["member.removed", "member.left"].includes(e.action) && e.targetId === me.userId) closed = true;
       });
       stream.onAbort(() => {
         closed = true;
@@ -276,6 +280,14 @@ export function liveRoutes(deps: Deps) {
       try {
         await stream.writeSSE({ event: "ready", data: JSON.stringify({ tripId: trip.id }) });
         while (!closed) {
+          if (now().getTime() - checkedAt >= 25_000) {
+            try {
+              await deps.tokens.verifyAccessToken(bearer);
+              const current = await loadTrip(db, trip.id, me);
+              assertCan(current.ctx, "trip.view");
+              checkedAt = now().getTime();
+            } catch { break; }
+          }
           const next = queue.shift();
           if (next) {
             await stream.writeSSE({ event: "trip", data: next });
@@ -284,12 +296,14 @@ export function liveRoutes(deps: Deps) {
           // 等待新事件或 25 秒後送心跳
           await new Promise<void>((resolve) => {
             wake = resolve;
-            setTimeout(resolve, deps.sseHeartbeatMs ?? 25_000);
+            timer = setTimeout(resolve, deps.sseHeartbeatMs ?? 25_000);
           });
+          clearTimeout(timer);
           wake = null;
           if (queue.length === 0 && !closed) await stream.writeSSE({ event: "ping", data: "" });
         }
       } finally {
+        clearTimeout(timer);
         unsubscribe();
       }
     });

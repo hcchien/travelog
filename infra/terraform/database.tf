@@ -43,9 +43,14 @@ resource "random_password" "db" {
   special = false
 }
 
-# 內建使用者屬於 cloudsqlsuperuser，migration 可以建立 postgis 等 extension
+# 僅 migration 使用既有 owner；runtime login 由 migration 以 SQL 建立，避免自動授予 cloudsqlsuperuser。
 resource "google_sql_user" "app" {
   name     = "travelog"
   instance = google_sql_database_instance.main.name
   password = random_password.db.result
+}
+
+resource "random_password" "runtime_db" {
+  length  = 32
+  special = false
 }

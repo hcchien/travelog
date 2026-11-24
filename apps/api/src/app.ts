@@ -5,6 +5,7 @@ import { accountRoutes } from "./auth/account.js";
 import { passkeyRoutes } from "./auth/passkey.js";
 import { authRoutes } from "./auth/routes.js";
 import type { AppEnv, Deps } from "./context.js";
+import { inputLimits, anonymousLimits } from "./lib/limits.js";
 import { handleError, notFound } from "./lib/problem.js";
 import { mcpRoutes } from "./mcp/routes.js";
 import { oauthRoutes } from "./oauth/routes.js";
@@ -47,6 +48,9 @@ export function createApp(deps: Deps) {
       maxAge: 600,
     }),
   );
+
+  app.use("*", anonymousLimits(deps));
+  app.use("*", inputLimits());
 
   app.get("/healthz", (c) => c.json({ ok: true }));
 

@@ -1,3 +1,4 @@
+import { assertSession, invalidateSession, sessionScope } from "./session";
 import * as SecureStore from "expo-secure-store";
 
 export const API_ORIGIN = (process.env.EXPO_PUBLIC_API_ORIGIN ?? "http://localhost:8080").replace(
@@ -27,20 +28,32 @@ export class OfflineError extends Error {
 
 let accessToken: string | null = null;
 let refreshing: Promise<string> | null = null;
+let credentialWrites: Promise<unknown> = Promise.resolve();
 let onSignedOut: (() => void) | null = null;
 
 export const setSignedOutHandler = (fn: () => void) => {
   onSignedOut = fn;
 };
 
-export async function saveSession(tokens: { accessToken: string; refreshToken: string }) {
-  accessToken = tokens.accessToken;
-  await SecureStore.setItemAsync(REFRESH_KEY, tokens.refreshToken);
+export async function saveSession(tokens: { accessToken: string; refreshToken: string }, scope = sessionScope()) {
+  assertSession(scope);
+  const write = credentialWrites.then(async () => {
+    assertSession(scope);
+    await SecureStore.setItemAsync(REFRESH_KEY, tokens.refreshToken);
+    assertSession(scope);
+    accessToken = tokens.accessToken;
+  });
+  credentialWrites = write.catch(() => {});
+  await write;
 }
 
 export async function clearSession() {
+  invalidateSession();
   accessToken = null;
-  await SecureStore.deleteItemAsync(REFRESH_KEY);
+  refreshing = null;
+  const clear = credentialWrites.then(() => SecureStore.deleteItemAsync(REFRESH_KEY));
+  credentialWrites = clear.catch(() => {});
+  await clear;
 }
 
 export const getRefreshToken = () => SecureStore.getItemAsync(REFRESH_KEY);
@@ -56,7 +69,9 @@ async function rawFetch(url: string, init: RequestInit) {
 
 /** 用 refresh token 換新的 access token（同時只發一個請求；refresh token 會輪替）。 */
 export function refreshSession(): Promise<string> {
-  refreshing ??= (async () => {
+  if (refreshing) return refreshing;
+  const scope = sessionScope();
+  const work = (async () => {
     const refreshToken = await getRefreshToken();
     if (!refreshToken) throw new ApiError(401, "/problems/unauthorized", "需要登入", {});
     const res = await rawFetch(`${API_ORIGIN}/v1/auth/refresh`, {
@@ -64,6 +79,7 @@ export function refreshSession(): Promise<string> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
     });
+    assertSession(scope);
     if (res.status === 401) {
       await clearSession();
       onSignedOut?.();
@@ -71,12 +87,13 @@ export function refreshSession(): Promise<string> {
     }
     if (!res.ok) throw new ApiError(res.status, "/problems/refresh", "暫時無法更新登入狀態", {});
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
-    await saveSession(body);
+    await saveSession(body, scope);
     return body.accessToken;
   })().finally(() => {
-    refreshing = null;
+    if (refreshing === work) refreshing = null;
   });
-  return refreshing;
+  refreshing = work;
+  return work;
 }
 
 export async function api<T = unknown>(
@@ -84,7 +101,9 @@ export async function api<T = unknown>(
   path: string,
   opts: { body?: unknown; headers?: Record<string, string>; auth?: boolean } = {},
 ): Promise<T> {
+  const scope = sessionScope();
   const send = async () => {
+    assertSession(scope);
     const headers: Record<string, string> = { ...opts.headers };
     if (opts.auth !== false && accessToken) headers.Authorization = `Bearer ${accessToken}`;
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
@@ -96,10 +115,12 @@ export async function api<T = unknown>(
   };
   if (opts.auth !== false && !accessToken) await refreshSession();
   let res = await send();
+  assertSession(scope);
   if (res.status === 401 && opts.auth !== false) {
     await refreshSession();
     res = await send();
   }
+  assertSession(scope);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
@@ -111,6 +132,7 @@ export async function api<T = unknown>(
       body,
     );
   }
+  assertSession(scope);
   return body as T;
 }
 

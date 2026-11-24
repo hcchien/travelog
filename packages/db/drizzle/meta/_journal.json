@@ -71,6 +71,20 @@
       "when": 1795317580647,
       "tag": "0009_push_and_note_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795355100000,
+      "tag": "0010_saved_place_rating",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795420800000,
+      "tag": "0011_security_boundaries",
+      "breakpoints": true
     }
   ]
 }

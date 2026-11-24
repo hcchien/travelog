@@ -120,6 +120,14 @@ resource "google_cloud_run_v2_service" "web" {
       resources {
         limits = { cpu = "1", memory = "512Mi" }
       }
+      env {
+        name  = "APP_ORIGIN"
+        value = local.app_origin
+      }
+      env {
+        name  = "API_ORIGIN"
+        value = local.api_origin
+      }
       # 公開遊記頁在伺服器端呼叫 API：直接走 run.app 網址，不繞自訂網域
       env {
         name  = "API_INTERNAL_ORIGIN"
@@ -142,7 +150,7 @@ resource "google_cloud_run_v2_job" "migrate" {
   template {
     task_count = 1
     template {
-      service_account = google_service_account.api.email
+      service_account = google_service_account.migration.email
       max_retries     = 0
       timeout         = "600s"
       volumes {
@@ -156,6 +164,15 @@ resource "google_cloud_run_v2_job" "migrate" {
         command = ["node", "dist/migrate.js"]
         env {
           name = "DATABASE_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.generated["migration-database-url"].secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "RUNTIME_DATABASE_URL"
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.generated["database-url"].secret_id
@@ -178,9 +195,8 @@ resource "google_cloud_run_v2_job" "migrate" {
   depends_on = [
     google_secret_manager_secret_version.generated,
     google_secret_manager_secret_version.manual_placeholder,
-    google_secret_manager_secret_iam_member.api_generated,
-    google_secret_manager_secret_iam_member.api_manual,
-    google_project_iam_member.api_sql,
+    google_secret_manager_secret_iam_member.migration_database,
+    google_project_iam_member.migration_sql,
   ]
 }
 

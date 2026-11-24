@@ -28,9 +28,68 @@ interface City {
   count: number;
 }
 
+const RATING_LABELS: Record<number, string> = {
+  1: "1★ 大雷（別再去）",
+  2: "2★ 踩雷（不推）",
+  3: "3★ 普通",
+  4: "4★ 喜歡（推薦）",
+  5: "5★ 必訪（超推）",
+};
+
+function StarBar({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number | null;
+  onChange: (next: number | null) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label="評分">
+      {[1, 2, 3, 4, 5].map((n) => {
+        const active = value !== null && n <= value;
+        return (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            aria-label={`${n} 顆星`}
+            aria-pressed={value === n}
+            onClick={() => onChange(value === n ? null : n)}
+            className={cx(
+              "text-lg leading-none transition-transform hover:scale-110",
+              active
+                ? value !== null && value <= 2
+                  ? "text-danger"
+                  : "text-amber-500"
+                : "text-line-strong hover:text-amber-400",
+            )}
+          >
+            ★
+          </button>
+        );
+      })}
+      {value !== null ? (
+        <span
+          className={cx(
+            "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+            value <= 2 ? "bg-red-50 text-danger" : "bg-amber-50 text-amber-800",
+          )}
+        >
+          {value <= 2 ? `⚠️ 避雷 (${value}★)` : `${value}★`}
+        </span>
+      ) : (
+        <span className="ml-1 text-xs text-muted">未評分</span>
+      )}
+    </div>
+  );
+}
+
 function EditSaved({ item, onDone }: { item: SavedPlace; onDone: () => void }) {
   const toast = useToast();
   const [category, setCategory] = useState(item.category);
+  const [rating, setRating] = useState<number | null>(item.rating ?? null);
   const [tags, setTags] = useState(item.tags.join("、"));
   const [note, setNote] = useState(item.privateNote ?? "");
   const [busy, setBusy] = useState(false);
@@ -44,6 +103,7 @@ function EditSaved({ item, onDone }: { item: SavedPlace; onDone: () => void }) {
           await api("PATCH", `/v1/me/saved-places/${item.id}`, {
             body: {
               category,
+              rating,
               tags: tags.split(/[、,，\s]+/).filter(Boolean),
               privateNote: note || null,
             },
@@ -71,6 +131,17 @@ function EditSaved({ item, onDone }: { item: SavedPlace; onDone: () => void }) {
           </Select>
         )}
       </Field>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[13px] font-semibold text-ink-soft">
+          個人評分（1–2★ 標示為避雷，再點一次同星等可清除）
+        </span>
+        <div className="flex items-center gap-3">
+          <StarBar value={rating} onChange={setRating} disabled={busy} />
+          {rating !== null && (
+            <span className="text-xs text-muted">{RATING_LABELS[rating]}</span>
+          )}
+        </div>
+      </div>
       <Field label="標籤" hint="用頓號或空白分隔，例如：必去、雨天備案">
         {(id) => <Input id={id} value={tags} onChange={(e) => setTags(e.target.value)} />}
       </Field>
@@ -97,6 +168,7 @@ function PlacesPage() {
   const toast = useToast();
   const [city, setCity] = useState<string | null>(null);
   const [category, setCategory] = useState<SavedCategory | null>(null);
+  const [ratingFilter, setRatingFilter] = useState<"all" | "good" | "avoid" | "unrated">("all");
   const [editing, setEditing] = useState<SavedPlace | null>(null);
 
   const cities = useQuery({
@@ -134,6 +206,26 @@ function PlacesPage() {
   }
 
   const activeName = cities.data?.find((c) => c.cityKey === activeCity)?.cityName;
+  const filteredList = (list.data ?? []).filter((s) => {
+    if (ratingFilter === "good") return s.rating !== null && s.rating >= 4;
+    if (ratingFilter === "avoid") return s.rating !== null && s.rating <= 2;
+    if (ratingFilter === "unrated") return s.rating === null;
+    return true;
+  });
+
+  async function quickRate(s: SavedPlace, next: number | null) {
+    try {
+      await api("PATCH", `/v1/me/saved-places/${s.id}`, { body: { rating: next } });
+      toast(
+        next === null
+          ? `已清除「${s.place.name}」的評分`
+          : `已將「${s.place.name}」評為 ${next} 顆星`,
+      );
+      refresh();
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }
 
   return (
     <main className="mx-auto flex max-w-[1280px] flex-col gap-6 px-5 py-8 sm:px-8">
@@ -198,12 +290,42 @@ function PlacesPage() {
                 </button>
               ))}
             </div>
-            {list.data?.length === 0 && <p className="text-sm text-muted">這個分類還沒有地點。</p>}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  ["all", "全部評分"],
+                  ["good", "★ 4+ 推薦"],
+                  ["avoid", "⚠️ 1–2★ 避雷"],
+                  ["unrated", "未評分"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={ratingFilter === key}
+                  onClick={() => setRatingFilter(key)}
+                  className={cx(
+                    "h-7 rounded-full border px-2.5 text-xs",
+                    ratingFilter === key
+                      ? "border-ink bg-ink font-semibold text-white"
+                      : "border-line bg-white text-ink-soft",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {filteredList.length === 0 && (
+              <p className="text-sm text-muted">這個篩選條件下還沒有地點。</p>
+            )}
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-              {list.data?.map((s) => (
+              {filteredList.map((s) => (
                 <li
                   key={s.id}
-                  className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-4"
+                  className={cx(
+                    "flex flex-col gap-2 rounded-2xl border bg-white p-4",
+                    s.rating !== null && s.rating <= 2 ? "border-red-300" : "border-line",
+                  )}
                 >
                   <div className="flex items-start gap-2">
                     <strong className="min-w-0 flex-1 text-[16px]">{s.place.name}</strong>
@@ -232,6 +354,7 @@ function PlacesPage() {
                     </button>
                   </div>
                   <span className="text-xs text-muted">{s.place.address}</span>
+                  <StarBar value={s.rating ?? null} onChange={(next) => void quickRate(s, next)} />
                   <div className="flex flex-wrap gap-1">
                     <Pill>{categoryLabel(s.category)}</Pill>
                     {s.tags.map((t) => (

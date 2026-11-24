@@ -225,17 +225,63 @@ export function SidePanel({
               {saved.data?.map((s) => (
                 <li
                   key={s.id}
-                  className="flex items-center gap-2.5 rounded-xl bg-canvas px-3 py-2.5"
+                  className={cx(
+                    "flex items-center gap-2.5 rounded-xl bg-canvas px-3 py-2.5",
+                    s.rating !== null && s.rating <= 2 && "border border-red-300 bg-red-50/40",
+                  )}
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className="truncate text-[15px] font-semibold">{s.place.name}</span>
-                    <span className="flex flex-wrap gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[15px] font-semibold">{s.place.name}</span>
+                      {s.rating !== null && (
+                        <span
+                          className={cx(
+                            "flex-none rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+                            s.rating <= 2
+                              ? "bg-red-100 text-danger"
+                              : "bg-amber-100 text-amber-800",
+                          )}
+                        >
+                          {s.rating <= 2 ? `⚠️ ${s.rating}★ 避雷` : `★ ${s.rating}`}
+                        </span>
+                      )}
+                    </div>
+                    <span className="flex flex-wrap items-center gap-1">
                       <Pill>{categoryLabel(s.category)}</Pill>
                       {s.tags.map((t) => (
                         <Pill key={t} tone="brand">
                           {t}
                         </Pill>
                       ))}
+                      <span className="ml-1 inline-flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            aria-label={`將 ${s.place.name} 評為 ${n} 顆星`}
+                            onClick={() =>
+                              attempt(async () => {
+                                const next = s.rating === n ? null : n;
+                                await api("PATCH", `/v1/me/saved-places/${s.id}`, {
+                                  body: { rating: next },
+                                });
+                                void qc.invalidateQueries({ queryKey: keys.saved });
+                                void qc.invalidateQueries({ queryKey: keys.savedForTrip(trip.id) });
+                              })
+                            }
+                            className={cx(
+                              "text-xs leading-none",
+                              s.rating !== null && n <= s.rating
+                                ? s.rating <= 2
+                                  ? "text-danger"
+                                  : "text-amber-500"
+                                : "text-line-strong hover:text-amber-400",
+                            )}
+                          >
+                            ★
+                          </button>
+                        ))}
+                      </span>
                     </span>
                     {s.privateNote && (
                       <span className="truncate text-xs text-muted">🔒 {s.privateNote}</span>

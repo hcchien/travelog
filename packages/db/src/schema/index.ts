@@ -5,3 +5,4 @@ export * from "./journal.js";
 export * from "./places.js";
 export * from "./trips.js";
 export * from "./users.js";
+export * from "./security.js";

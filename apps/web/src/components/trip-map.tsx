@@ -13,7 +13,7 @@ export interface MapPoint {
 }
 
 const KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY;
-const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAP_ID ?? "DEMO_MAP_ID";
+const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || "DEMO_MAP_ID";
 
 function FitBounds({ points }: { points: MapPoint[] }) {
   const map = useMap();
