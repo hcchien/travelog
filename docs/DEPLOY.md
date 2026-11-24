@@ -108,3 +108,17 @@ Actions 會依序：lint／typecheck／test／Terraform 驗證 → 建置並推�
 - Cloud Run 單一請求最長 60 分鐘，SSE 連線到時會中斷，前端會自動重連。
 - Cloud Run 網域對應只有部分區域支援（`asia-east1` 有支援）；換到不支援的區域時，改用外部 HTTPS Load Balancer（ARCHITECTURE §10）。
 - `terraform destroy` 會刪除資料庫（dev 預設沒有刪除保護）與附件 bucket。
+
+## Google Maps browser key rotation
+
+Do not put the Maps key value in `cloudbuild.yaml` or other tracked files. Configure `_NEXT_PUBLIC_GOOGLE_MAPS_KEY` in the Cloud Build trigger/submission (or the existing GitHub Actions variable for that deployment path). The Cloud Build Web step rejects an empty value to avoid deploying a map without its configured key.
+
+For GitHub secret-scanning alert #1 (introduced in commit `7945756`):
+
+1. Identify the owning Google Cloud project and check API usage and restrictions. The alert currently reports validity as unknown; repository configuration alone cannot establish whether the key is active or restricted.
+2. Create a replacement browser key with the required website referrers and Maps APIs restricted. Keep server-side Places credentials separate.
+3. Update the build configuration, rebuild/deploy Web, and verify the map and Places workflows before revoking the old key. `NEXT_PUBLIC_*` is embedded at build time; changing only the running container environment does not replace it.
+4. Revoke/delete the exposed key in its owning project, then check API-key administration audit logs and API usage/error/quota metrics from before the exposure through revocation. Google Maps API usage may not provide individual end-user request audit logs; do not treat absent audit logs as proof of no misuse.
+5. Close the GitHub alert as **revoked** only after Google confirms revocation. Removing the current value from Git does not revoke it or remove historical commits.
+
+This repository change removes the committed default only. It does not rotate/revoke the Google credential, change deployed builds, inspect cloud logs, or close the alert.
