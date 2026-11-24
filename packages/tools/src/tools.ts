@@ -512,7 +512,13 @@ export const TOOLS: ToolDef[] = [
     input: {
       city: z.string().optional().describe("城市 key，例如 jp-tokyo、jp-kyoto、tw-taipei"),
       category: z.enum(SAVED_PLACE_CATEGORIES).optional(),
-      minRating: z.number().int().min(1).max(5).optional().describe("只列出評分 ≥ 此分數（1–5）的地點"),
+      minRating: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("只列出評分 ≥ 此分數（1–5）的地點"),
       tripId: tripId.optional(),
     },
     async run(ctx, a) {
@@ -590,7 +596,10 @@ export const TOOLS: ToolDef[] = [
         };
       } catch (err) {
         const existingId = (err as { body?: { savedPlaceId?: string } }).body?.savedPlaceId;
-        if (existingId && (a.rating !== undefined || a.category || a.tags || a.note !== undefined)) {
+        if (
+          existingId &&
+          (a.rating !== undefined || a.category || a.tags || a.note !== undefined)
+        ) {
           const patch: Record<string, unknown> = {};
           if (a.category !== undefined) patch.category = a.category;
           if (a.tags !== undefined) patch.tags = a.tags;

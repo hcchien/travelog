@@ -1,7 +1,10 @@
 import type { createDb } from "@travelog/db";
 
 /** Only called by the migration identity, never the API process. */
-export async function provisionRuntimeRole(sql: ReturnType<typeof createDb>["sql"], rawUrl: string) {
+export async function provisionRuntimeRole(
+  sql: ReturnType<typeof createDb>["sql"],
+  rawUrl: string,
+) {
   const url = new URL(rawUrl);
   const role = decodeURIComponent(url.username);
   const password = decodeURIComponent(url.password);
@@ -18,16 +21,19 @@ export async function provisionRuntimeRole(sql: ReturnType<typeof createDb>["sql
       JOIN pg_roles parent ON parent.oid = m.roleid
       JOIN pg_roles child ON child.oid = m.member WHERE child.rolname = ${role}`;
     for (const member of memberships) {
-      const [command] = await tx`SELECT format('REVOKE %I FROM %I', ${member.rolname}, ${role}) AS statement`;
+      const [command] =
+        await tx`SELECT format('REVOKE %I FROM %I', ${member.rolname}, ${role}) AS statement`;
       await tx.unsafe(command!.statement);
     }
     const [alter] = await tx`SELECT format(
       'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
       ${role}, ${password}) AS statement`;
     await tx.unsafe(alter!.statement);
-    const [database] = await tx`SELECT format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM PUBLIC', ${owner.database}) AS statement`;
+    const [database] =
+      await tx`SELECT format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM PUBLIC', ${owner.database}) AS statement`;
     await tx.unsafe(database!.statement);
-    const [connect] = await tx`SELECT format('GRANT CONNECT ON DATABASE %I TO %I', ${owner.database}, ${role}) AS statement`;
+    const [connect] =
+      await tx`SELECT format('GRANT CONNECT ON DATABASE %I TO %I', ${owner.database}, ${role}) AS statement`;
     await tx.unsafe(connect!.statement);
     await tx`REVOKE CREATE ON SCHEMA public FROM PUBLIC`;
     await tx`REVOKE ALL ON SCHEMA public FROM travelog_runtime`;
@@ -35,7 +41,8 @@ export async function provisionRuntimeRole(sql: ReturnType<typeof createDb>["sql
     await tx`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM travelog_runtime`;
     await tx`REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM travelog_runtime`;
     // Grant only application-owned tables, excluding extension-owned relations.
-    const tables = await tx`SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO travelog_runtime', n.nspname, c.relname) AS statement
+    const tables =
+      await tx`SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO travelog_runtime', n.nspname, c.relname) AS statement
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relowner = current_user::regrole
       AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')`;

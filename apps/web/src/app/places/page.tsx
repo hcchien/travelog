@@ -46,7 +46,7 @@ function StarBar({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1" role="group" aria-label="評分">
+    <fieldset className="flex items-center gap-1" aria-label="評分">
       {[1, 2, 3, 4, 5].map((n) => {
         const active = value !== null && n <= value;
         return (
@@ -82,7 +82,7 @@ function StarBar({
       ) : (
         <span className="ml-1 text-xs text-muted">未評分</span>
       )}
-    </div>
+    </fieldset>
   );
 }
 
@@ -137,9 +137,7 @@ function EditSaved({ item, onDone }: { item: SavedPlace; onDone: () => void }) {
         </span>
         <div className="flex items-center gap-3">
           <StarBar value={rating} onChange={setRating} disabled={busy} />
-          {rating !== null && (
-            <span className="text-xs text-muted">{RATING_LABELS[rating]}</span>
-          )}
+          {rating !== null && <span className="text-xs text-muted">{RATING_LABELS[rating]}</span>}
         </div>
       </div>
       <Field label="標籤" hint="用頓號或空白分隔，例如：必去、雨天備案">

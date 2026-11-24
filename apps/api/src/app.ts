@@ -5,7 +5,7 @@ import { accountRoutes } from "./auth/account.js";
 import { passkeyRoutes } from "./auth/passkey.js";
 import { authRoutes } from "./auth/routes.js";
 import type { AppEnv, Deps } from "./context.js";
-import { inputLimits, anonymousLimits } from "./lib/limits.js";
+import { anonymousLimits, inputLimits } from "./lib/limits.js";
 import { handleError, notFound } from "./lib/problem.js";
 import { mcpRoutes } from "./mcp/routes.js";
 import { oauthRoutes } from "./oauth/routes.js";

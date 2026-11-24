@@ -117,39 +117,66 @@ export class TokenService {
   }
 
   async assertActiveUser(userId: string, db: Pick<Database, "select"> = this.db) {
-    const [user] = await db.select({ id: schema.users.id }).from(schema.users)
+    const [user] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
       .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)));
     if (!user) throw unauthorized("帳號已失效");
   }
 
   private async createGrant(userId: string, clientId: string, scope?: string, resource?: string) {
     return this.db.transaction(async (tx) => {
-      const [user] = await tx.select().from(schema.users)
-        .where(eq(schema.users.id, userId)).for("update");
+      const [user] = await tx
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .for("update");
       if (!user || user.deletedAt) throw unauthorized("帳號已失效");
       const familyId = randomUUID();
       const refreshToken = await this.insertRefreshToken(tx, {
-        userId, clientId, familyId, ...(scope !== undefined ? { scope } : {}),
+        userId,
+        clientId,
+        familyId,
+        ...(scope !== undefined ? { scope } : {}),
         ...(resource !== undefined ? { resource } : {}),
       });
       return { familyId, refreshToken };
     });
   }
 
-  async issueAccessToken(userId: string, clientId: FirstPartyClient, familyId?: string): Promise<string> {
+  async issueAccessToken(
+    userId: string,
+    clientId: FirstPartyClient,
+    familyId?: string,
+  ): Promise<string> {
     await this.assertActiveUser(userId);
     const family = familyId ?? (await this.createGrant(userId, clientId)).familyId;
-    return this.sign({ cid: clientId, fid: family }, userId,
-      this.config.apiOrigin, this.config.accessTokenTtlSeconds);
+    return this.sign(
+      { cid: clientId, fid: family },
+      userId,
+      this.config.apiOrigin,
+      this.config.accessTokenTtlSeconds,
+    );
   }
 
   /** /mcp 呼叫 API 用的內部權杖，也綁定相同的授權 family。 */
-  async issueInternalToken(userId: string, scopes: OAuthScope[], oauthClientId: string, familyId?: string): Promise<string> {
+  async issueInternalToken(
+    userId: string,
+    scopes: OAuthScope[],
+    oauthClientId: string,
+    familyId?: string,
+  ): Promise<string> {
     await this.assertActiveUser(userId);
-    const family = familyId ?? (await this.createGrant(userId, oauthClientId, scopes.join(" "), this.mcpResource)).familyId;
+    const family =
+      familyId ??
+      (await this.createGrant(userId, oauthClientId, scopes.join(" "), this.mcpResource)).familyId;
     if (!(await this.hasActiveGrant(userId, oauthClientId, family, scopes))) throw unauthorized();
-    return this.sign({ cid: "mcp", scope: scopes.join(" "), ocid: oauthClientId, fid: family },
-      userId, this.config.apiOrigin, INTERNAL_TTL);
+    return this.sign(
+      { cid: "mcp", scope: scopes.join(" "), ocid: oauthClientId, fid: family },
+      userId,
+      this.config.apiOrigin,
+      INTERNAL_TTL,
+    );
   }
 
   async verifyAccessToken(token: string): Promise<AccessClaims> {
@@ -167,28 +194,40 @@ export class TokenService {
         return { userId: p.sub, clientId: "mcp", familyId: p.fid, scopes, oauthClientId: p.ocid };
       }
       throw new Error("invalid cid");
-    } catch { throw unauthorized("登入已過期或無效"); }
+    } catch {
+      throw unauthorized("登入已過期或無效");
+    }
   }
 
   async verifyMcpToken(token: string): Promise<McpClaims> {
     try {
       const p = await this.verify(token, this.mcpResource);
-      if (typeof p.cid !== "string" || typeof p.scope !== "string" || typeof p.fid !== "string") throw new Error("invalid claims");
+      if (typeof p.cid !== "string" || typeof p.scope !== "string" || typeof p.fid !== "string")
+        throw new Error("invalid claims");
       await this.assertActiveUser(p.sub);
       const scopes = parseScopes(p.scope);
       if (!(await this.hasActiveGrant(p.sub, p.cid, p.fid, scopes))) throw new Error("revoked");
       return { userId: p.sub, oauthClientId: p.cid, familyId: p.fid, scopes };
-    } catch { throw unauthorized("授權已過期或無效"); }
+    } catch {
+      throw unauthorized("授權已過期或無效");
+    }
   }
 
   /** 不輪替 cookie；只用於驗證同一瀏覽器的帳號連結交易。 */
   async webSession(raw: string | undefined) {
     if (!raw) throw unauthorized();
-    const [row] = await this.db.select().from(schema.refreshTokens).where(and(
-      eq(schema.refreshTokens.tokenHash, sha256(raw)), eq(schema.refreshTokens.clientId, "web"),
-      isNull(schema.refreshTokens.revokedAt), isNull(schema.refreshTokens.replacedAt),
-      gt(schema.refreshTokens.expiresAt, this.now()),
-    ));
+    const [row] = await this.db
+      .select()
+      .from(schema.refreshTokens)
+      .where(
+        and(
+          eq(schema.refreshTokens.tokenHash, sha256(raw)),
+          eq(schema.refreshTokens.clientId, "web"),
+          isNull(schema.refreshTokens.revokedAt),
+          isNull(schema.refreshTokens.replacedAt),
+          gt(schema.refreshTokens.expiresAt, this.now()),
+        ),
+      );
     if (!row) throw unauthorized();
     await this.assertActiveUser(row.userId);
     return row;
@@ -211,7 +250,12 @@ export class TokenService {
     scopes: OAuthScope[],
   ): Promise<IssuedTokens> {
     const scope = scopes.join(" ");
-    const { refreshToken, familyId } = await this.createGrant(userId, oauthClientId, scope, this.mcpResource);
+    const { refreshToken, familyId } = await this.createGrant(
+      userId,
+      oauthClientId,
+      scope,
+      this.mcpResource,
+    );
     return {
       accessToken: await this.sign(
         { cid: oauthClientId, scope, fid: familyId },
@@ -234,10 +278,16 @@ export class TokenService {
   ): Promise<IssuedTokens & { userId: string; clientId: string; scopes: OAuthScope[] }> {
     const now = this.now();
     const result = await this.db.transaction(async (tx) => {
-      const [candidate] = await tx.select({ userId: schema.refreshTokens.userId }).from(schema.refreshTokens)
+      const [candidate] = await tx
+        .select({ userId: schema.refreshTokens.userId })
+        .from(schema.refreshTokens)
         .where(eq(schema.refreshTokens.tokenHash, sha256(raw)));
       if (!candidate) return { ok: false as const };
-      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, candidate.userId)).for("update");
+      const [user] = await tx
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, candidate.userId))
+        .for("update");
       if (!user || user.deletedAt) return { ok: false as const };
       const [row] = await tx
         .select()
@@ -319,7 +369,12 @@ export class TokenService {
   }
 
   /** 使用者是否仍授權這個 OAuth client（撤銷後立即生效，不必等 access token 過期）。 */
-  async hasActiveGrant(userId: string, oauthClientId: string, familyId: string, scopes: OAuthScope[] = []): Promise<boolean> {
+  async hasActiveGrant(
+    userId: string,
+    oauthClientId: string,
+    familyId: string,
+    scopes: OAuthScope[] = [],
+  ): Promise<boolean> {
     const [row] = await this.db
       .select({ scope: schema.refreshTokens.scope })
       .from(schema.refreshTokens)

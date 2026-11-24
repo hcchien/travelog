@@ -5,14 +5,17 @@ CREATE TABLE browser_auth_states (
 );
 --> statement-breakpoint
 CREATE TABLE rate_limits (key text PRIMARY KEY, hits integer NOT NULL, expires_at timestamptz NOT NULL);
+--> statement-breakpoint
 CREATE INDEX rate_limits_expires_at_idx ON rate_limits(expires_at);
 --> statement-breakpoint
 CREATE TABLE storage_deletions (storage_key text PRIMARY KEY, available_at timestamptz NOT NULL, attempts integer NOT NULL DEFAULT 0);
+--> statement-breakpoint
 CREATE INDEX storage_deletions_available_at_idx ON storage_deletions(available_at);
 --> statement-breakpoint
 ALTER TABLE attachments ADD COLUMN storage_generation text;
 --> statement-breakpoint
 ALTER TABLE trips DROP CONSTRAINT trips_date_range;
+--> statement-breakpoint
 -- NOT VALID permits operators to inspect legacy invalid rows without blocking the security rollout;
 -- PostgreSQL still enforces the constraint on every new/updated row.
 ALTER TABLE trips ADD CONSTRAINT trips_date_range CHECK (end_date >= start_date AND end_date - start_date < 60) NOT VALID;

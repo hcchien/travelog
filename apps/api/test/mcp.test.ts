@@ -137,7 +137,11 @@ describe("探索與未授權", () => {
   });
 
   it("沒有權杖時回 401 並指向 resource metadata", async () => {
-    const res = await t.app.request("/mcp", { method: "POST", body: "{}" });
+    const res = await t.app.request("/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toContain(
       `resource_metadata="${API_ORIGIN}/.well-known/oauth-protected-resource/mcp"`,
@@ -639,16 +643,19 @@ describe("復原 MCP 的修改", () => {
 
 describe("帳號連結", () => {
   async function linkGoogle(user: User, idTokenFor: (nonce: string) => string) {
-    const start = await t.request("POST", "/v1/me/identities/link/google", { token: user.token });
-    const url = new URL(start.json.url);
-    const res = await t.app.request(url.pathname + url.search);
-    const google = new URL(res.headers.get("location") ?? "");
-    const cookie = res.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const session = await t.tokens.issue(user.userId, "web");
+    const start = await t.request("POST", "/v1/me/identities/link/google", {
+      token: session.accessToken,
+      headers: { Origin: APP_ORIGIN, Cookie: `tl_rt=${session.refreshToken}` },
+    });
+    expect(start.status).toBe(200);
+    const google = new URL(start.json.url);
+    const cookie = start.headers.getSetCookie()[0]?.split(";")[0] ?? "";
     const code = encodeURIComponent(idTokenFor(google.searchParams.get("nonce") ?? ""));
     const cb = await t.app.request(
       `/v1/auth/google/callback?code=${code}&state=${google.searchParams.get("state")}`,
       {
-        headers: { Cookie: cookie },
+        headers: { Cookie: `${cookie}; tl_rt=${session.refreshToken}` },
       },
     );
     return new URL(cb.headers.get("location") ?? "");

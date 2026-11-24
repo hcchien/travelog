@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { assertSession, sessionScope } from "./session";
-import { useAuth } from "./auth";
 import { ApiError, api, OfflineError } from "./api";
-import { readJson, writeJson, removeKey } from "./storage";
+import { useAuth } from "./auth";
+import { assertSession, sessionScope } from "./session";
+import { readJson, removeKey, writeJson } from "./storage";
 import type { JournalEntry, Snapshot, Trip } from "./types";
 
 /** 先打 API，成功就更新快取；離線時改讀快取並標示 offline。 */

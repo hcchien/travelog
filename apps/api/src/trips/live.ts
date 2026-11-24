@@ -267,11 +267,16 @@ export function liveRoutes(deps: Deps) {
       let checkedAt = 0;
       const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
       const unsubscribe = deps.events.subscribe(trip.id, (e) => {
-        if (queue.length >= 100) { closed = true; wake?.(); return; }
+        if (queue.length >= 100) {
+          closed = true;
+          wake?.();
+          return;
+        }
         queue.push(JSON.stringify(e));
         wake?.();
         // 被移出行程時結束連線
-        if (["member.removed", "member.left"].includes(e.action) && e.targetId === me.userId) closed = true;
+        if (["member.removed", "member.left"].includes(e.action) && e.targetId === me.userId)
+          closed = true;
       });
       stream.onAbort(() => {
         closed = true;
@@ -286,7 +291,9 @@ export function liveRoutes(deps: Deps) {
               const current = await loadTrip(db, trip.id, me);
               assertCan(current.ctx, "trip.view");
               checkedAt = now().getTime();
-            } catch { break; }
+            } catch {
+              break;
+            }
           }
           const next = queue.shift();
           if (next) {

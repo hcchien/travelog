@@ -7,12 +7,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   api,
   bindSessionUser,
-  sessionScope,
-  sameSession,
-  SessionChangedError,
   getAccessToken,
   lastRefreshOffline,
   refreshAccessToken,
+  SessionChangedError,
+  sameSession,
+  sessionScope,
   setAccessToken,
 } from "./api";
 import { bindTokenGetter } from "./live";

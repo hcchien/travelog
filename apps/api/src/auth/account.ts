@@ -37,7 +37,11 @@ export function accountRoutes(deps: Deps) {
       throw new ApiError(403, "/problems/forbidden", "只能在 Travelog 網站或 App 刪除帳號");
 
     await db.transaction(async (tx) => {
-      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, me.userId)).for("update");
+      await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.id, me.userId))
+        .for("update");
       const owned = await tx
         .select({ id: schema.trips.id })
         .from(schema.trips)
@@ -94,7 +98,9 @@ export function accountRoutes(deps: Deps) {
       await tx
         .delete(schema.webauthnChallenges)
         .where(eq(schema.webauthnChallenges.userId, me.userId));
-      await tx.delete(schema.browserAuthStates).where(eq(schema.browserAuthStates.userId, me.userId));
+      await tx
+        .delete(schema.browserAuthStates)
+        .where(eq(schema.browserAuthStates.userId, me.userId));
       await tx.delete(schema.oauthRequests).where(eq(schema.oauthRequests.userId, me.userId));
       // TODO(Apple 登入上線時)：先用 providerRefreshTokenEnc 呼叫 Apple /auth/revoke
       await tx.delete(schema.userIdentities).where(eq(schema.userIdentities.userId, me.userId));

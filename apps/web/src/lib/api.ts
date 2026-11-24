@@ -18,7 +18,10 @@ let sessionUser: string | null = null;
 export const sessionScope = () => ({ epoch: sessionEpoch, userId: sessionUser });
 export const sameSession = (scope: { epoch: number }) => scope.epoch === sessionEpoch;
 export function bindSessionUser(userId: string) {
-  if (sessionUser !== userId) { sessionEpoch++; sessionUser = userId; }
+  if (sessionUser !== userId) {
+    sessionEpoch++;
+    sessionUser = userId;
+  }
 }
 export class SessionChangedError extends Error {}
 export class OfflineError extends Error {}
@@ -27,7 +30,11 @@ let refreshing: Promise<string | null> | null = null;
 const RT_KEY = "travelog:rt";
 
 export const setAccessToken = (t: string | null) => {
-  if (t === null) { sessionEpoch++; sessionUser = null; refreshing = null; }
+  if (t === null) {
+    sessionEpoch++;
+    sessionUser = null;
+    refreshing = null;
+  }
   accessToken = t;
 };
 export const getAccessToken = () => accessToken;
@@ -35,11 +42,17 @@ export const getAccessToken = () => accessToken;
 // Remove credentials persisted by older clients without ever interpreting a URL credential.
 function removeLegacyCredential() {
   if (typeof window === "undefined") return;
-  try { localStorage.removeItem(RT_KEY); } catch {}
+  try {
+    localStorage.removeItem(RT_KEY);
+  } catch {}
   const params = new URLSearchParams(window.location.hash.slice(1));
   if (params.has("tl_rt")) {
     params.delete("tl_rt");
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${params.size ? `#${params}` : ""}`);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}${params.size ? `#${params}` : ""}`,
+    );
   }
 }
 
@@ -96,8 +109,11 @@ async function raw(method: string, path: string, opts: RequestOptions) {
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.ifMatch !== undefined) headers["If-Match"] = `"v${opts.ifMatch}"`;
-  const target = path.startsWith("/v1/auth/") ? `/session/${path.slice("/v1/auth/".length)}`
-    : path === "/v1/me/identities/link/google" ? "/session/link/google" : `${API_ORIGIN}${path}`;
+  const target = path.startsWith("/v1/auth/")
+    ? `/session/${path.slice("/v1/auth/".length)}`
+    : path === "/v1/me/identities/link/google"
+      ? "/session/link/google"
+      : `${API_ORIGIN}${path}`;
   return fetch(target, {
     method,
     headers,

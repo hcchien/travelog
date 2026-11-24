@@ -45,8 +45,7 @@ export function resendMailer(opts: { apiKey: string; from: string; fetch?: typeo
         body: JSON.stringify({ from: opts.from, to: [p.to], subject, text, html }),
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok)
-        throw new Error(`Resend 回應 ${res.status}`);
+      if (!res.ok) throw new Error(`Resend 回應 ${res.status}`);
     },
   };
 }

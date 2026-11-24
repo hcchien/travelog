@@ -3,8 +3,8 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { OAUTH_SCOPES } from "@travelog/domain";
 import { ApiCallError, explainError, type ToolContext, toolsForScopes } from "@travelog/tools";
 import { Hono } from "hono";
-import { budget } from "../lib/limits.js";
 import type { AppEnv, Deps } from "../context.js";
+import { budget } from "../lib/limits.js";
 
 const SERVER_INFO = { name: "travelog", title: "Travelog", version: "0.1.0" };
 
@@ -58,7 +58,14 @@ export function mcpRoutes(deps: Deps, getApp: () => Hono<AppEnv>) {
       return challenge("invalid_token");
     }
     // 使用者在 Travelog 撤銷連線後立即失效，不必等 access token 過期
-    if (!(await tokens.hasActiveGrant(claims.userId, claims.oauthClientId, claims.familyId, claims.scopes)))
+    if (
+      !(await tokens.hasActiveGrant(
+        claims.userId,
+        claims.oauthClientId,
+        claims.familyId,
+        claims.scopes,
+      ))
+    )
       return challenge("invalid_token");
 
     await budget(deps, claims.userId, "mcp-minute", 120, 60);
@@ -86,7 +93,10 @@ export function mcpRoutes(deps: Deps, getApp: () => Hono<AppEnv>) {
       },
     };
 
-    const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS, maxToolInputElements: 10_000 });
+    const server = new McpServer(SERVER_INFO, {
+      instructions: INSTRUCTIONS,
+      maxToolInputElements: 10_000,
+    });
     // 只列出授權範圍內的工具
     for (const tool of toolsForScopes(claims.scopes)) {
       server.registerTool(

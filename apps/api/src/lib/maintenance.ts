@@ -7,16 +7,28 @@ type MaintenanceDeps = Pick<Deps, "db" | "storage" | "now">;
 /** Safe across instances: locked rows are skipped; failures remain durable and retryable. */
 export async function drainStorageDeletions({ db, storage, now }: MaintenanceDeps) {
   await db.transaction(async (tx) => {
-    const rows = await tx.select().from(schema.storageDeletions)
-      .where(lte(schema.storageDeletions.availableAt, now())).limit(20).for("update", { skipLocked: true });
+    const rows = await tx
+      .select()
+      .from(schema.storageDeletions)
+      .where(lte(schema.storageDeletions.availableAt, now()))
+      .limit(20)
+      .for("update", { skipLocked: true });
     for (const row of rows) {
       try {
         await storage.remove(row.storageKey);
-        await tx.delete(schema.storageDeletions).where(eq(schema.storageDeletions.storageKey, row.storageKey));
+        await tx
+          .delete(schema.storageDeletions)
+          .where(eq(schema.storageDeletions.storageKey, row.storageKey));
       } catch {
-        await tx.update(schema.storageDeletions).set({ attempts: row.attempts + 1,
-          availableAt: new Date(now().getTime() + Math.min(3600_000, 60_000 * 2 ** Math.min(row.attempts, 6))),
-        }).where(eq(schema.storageDeletions.storageKey, row.storageKey));
+        await tx
+          .update(schema.storageDeletions)
+          .set({
+            attempts: row.attempts + 1,
+            availableAt: new Date(
+              now().getTime() + Math.min(3600_000, 60_000 * 2 ** Math.min(row.attempts, 6)),
+            ),
+          })
+          .where(eq(schema.storageDeletions.storageKey, row.storageKey));
         console.error("storage cleanup failed; retry queued");
       }
     }
@@ -25,7 +37,14 @@ export async function drainStorageDeletions({ db, storage, now }: MaintenanceDep
 
 export async function maintenance(deps: MaintenanceDeps) {
   const { db, now } = deps;
-  await db.delete(schema.attachments).where(and(eq(schema.attachments.status, "pending"), lt(schema.attachments.createdAt, new Date(now().getTime() - 86400_000))));
+  await db
+    .delete(schema.attachments)
+    .where(
+      and(
+        eq(schema.attachments.status, "pending"),
+        lt(schema.attachments.createdAt, new Date(now().getTime() - 86400_000)),
+      ),
+    );
   await db.delete(schema.browserAuthStates).where(lt(schema.browserAuthStates.expiresAt, now()));
   await db.delete(schema.webauthnChallenges).where(lt(schema.webauthnChallenges.expiresAt, now()));
   await db.delete(schema.oauthRequests).where(lt(schema.oauthRequests.expiresAt, now()));

@@ -12,10 +12,10 @@ resource "tls_private_key" "jwt" {
 
 locals {
   generated_secrets = {
-    "database-url" = "postgres://travelog_runtime:${random_password.runtime_db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
+    "database-url"           = "postgres://travelog_runtime:${random_password.runtime_db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
     "migration-database-url" = "postgres://${google_sql_user.app.name}:${random_password.db.result}@localhost/${google_sql_database.app.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
-    "cookie-secret"   = random_password.cookie.result
-    "jwt-private-key" = tls_private_key.jwt.private_key_pem_pkcs8
+    "cookie-secret"          = random_password.cookie.result
+    "jwt-private-key"        = tls_private_key.jwt.private_key_pem_pkcs8
   }
   # 需要手動填入的秘密：先放 "unset"，之後用 gcloud secrets versions add 更新（Terraform 不會覆蓋）
   manual_secrets = ["google-client-secret", "resend-api-key", "maps-server-key"]

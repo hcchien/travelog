@@ -5,8 +5,8 @@ import { createGoogleAuth } from "./auth/google.js";
 import { TokenService } from "./auth/tokens.js";
 import { loadConfig } from "./config.js";
 import { TRIP_EVENTS_CHANNEL, TripEvents } from "./lib/events.js";
-import { maintenance } from "./lib/maintenance.js";
 import { createMailer } from "./lib/mailer.js";
+import { maintenance } from "./lib/maintenance.js";
 import { expoPush, startPushNotifier } from "./lib/push.js";
 import { createGcsStorage, createLocalStorage } from "./lib/storage.js";
 import { createGooglePlaces } from "./places/provider.js";
@@ -51,9 +51,13 @@ let maintaining = false;
 const maintain = async () => {
   if (maintaining) return;
   maintaining = true;
-  try { await maintenance({ db, storage, now }); }
-  catch { console.error("maintenance failed; will retry"); }
-  finally { maintaining = false; }
+  try {
+    await maintenance({ db, storage, now });
+  } catch {
+    console.error("maintenance failed; will retry");
+  } finally {
+    maintaining = false;
+  }
 };
 void maintain();
 const maintenanceTimer = setInterval(() => void maintain(), 60_000);

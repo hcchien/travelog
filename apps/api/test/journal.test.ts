@@ -1,8 +1,8 @@
-import { drainStorageDeletions } from "../src/lib/maintenance.js";
 import { schema } from "@travelog/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { invitationEmail, resendMailer } from "../src/lib/mailer.js";
+import { drainStorageDeletions } from "../src/lib/maintenance.js";
 import { createTestApp, type TestApp } from "./helpers.js";
 
 let t: TestApp;
@@ -140,7 +140,10 @@ describe("附件", () => {
       .select()
       .from(schema.attachments)
       .where(eq(schema.attachments.id, done.json.id));
-    expect(await t.storage.stat(row?.storageKey as string)).toMatchObject({ size: pdf.length, generation: expect.any(String) });
+    expect(await t.storage.stat(row?.storageKey as string)).toMatchObject({
+      size: pdf.length,
+      generation: expect.any(String),
+    });
     // 只有上傳者或擁有者可以刪除
     expect(
       (
@@ -157,7 +160,11 @@ describe("附件", () => {
       ).status,
     ).toBe(204);
     // Deletion waits for the signed PUT URL to expire, so it cannot recreate an orphan.
-    await drainStorageDeletions({ db: t.db, storage: t.storage, now: () => new Date(Date.now() + 16 * 60_000) });
+    await drainStorageDeletions({
+      db: t.db,
+      storage: t.storage,
+      now: () => new Date(Date.now() + 16 * 60_000),
+    });
     expect(await t.storage.stat(row?.storageKey as string)).toBeNull();
   });
 

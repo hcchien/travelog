@@ -4,8 +4,8 @@ import { createUploadInput } from "@travelog/schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context.js";
-import { drainStorageDeletions } from "../lib/maintenance.js";
 import { randomToken } from "../lib/crypto.js";
+import { drainStorageDeletions } from "../lib/maintenance.js";
 import { requireAuth } from "../lib/middleware.js";
 import { ApiError, notFound } from "../lib/problem.js";
 import { validate } from "../lib/validate.js";
@@ -86,27 +86,48 @@ export function attachmentRoutes(deps: Deps) {
       // 物件名稱不含使用者輸入的檔名，避免路徑問題
       const storageKey = `trips/${trip.id}/${randomToken(18)}`;
       const a = await db.transaction(async (tx) => {
-        const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, me.userId)).for("update");
-        if (!user || user.deletedAt) throw new ApiError(401, "/problems/unauthorized", "帳號已失效");
-        await tx.select({ id: schema.trips.id }).from(schema.trips).where(eq(schema.trips.id, trip.id)).for("update");
-        const [tripQuota] = await tx.select({ count: sql<number>`count(*)::int`, size: sql<string>`coalesce(sum(${schema.attachments.sizeBytes}), 0)` })
-          .from(schema.attachments).where(eq(schema.attachments.tripId, trip.id));
-        const [userQuota] = await tx.select({ size: sql<string>`coalesce(sum(${schema.attachments.sizeBytes}), 0)` })
-          .from(schema.attachments).where(eq(schema.attachments.uploadedBy, me.userId));
-        if ((tripQuota?.count ?? 0) >= 500 || Number(tripQuota?.size ?? 0) + input.sizeBytes > 1024 ** 3 || Number(userQuota?.size ?? 0) + input.sizeBytes > 5 * 1024 ** 3)
+        const [user] = await tx
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, me.userId))
+          .for("update");
+        if (!user || user.deletedAt)
+          throw new ApiError(401, "/problems/unauthorized", "帳號已失效");
+        await tx
+          .select({ id: schema.trips.id })
+          .from(schema.trips)
+          .where(eq(schema.trips.id, trip.id))
+          .for("update");
+        const [tripQuota] = await tx
+          .select({
+            count: sql<number>`count(*)::int`,
+            size: sql<string>`coalesce(sum(${schema.attachments.sizeBytes}), 0)`,
+          })
+          .from(schema.attachments)
+          .where(eq(schema.attachments.tripId, trip.id));
+        const [userQuota] = await tx
+          .select({ size: sql<string>`coalesce(sum(${schema.attachments.sizeBytes}), 0)` })
+          .from(schema.attachments)
+          .where(eq(schema.attachments.uploadedBy, me.userId));
+        if (
+          (tripQuota?.count ?? 0) >= 500 ||
+          Number(tripQuota?.size ?? 0) + input.sizeBytes > 1024 ** 3 ||
+          Number(userQuota?.size ?? 0) + input.sizeBytes > 5 * 1024 ** 3
+        )
           throw new ApiError(429, "/problems/storage-quota", "附件已達儲存配額");
-        const [row] = await tx.insert(schema.attachments)
-        .values({
-          tripId: trip.id,
-          itemId: input.itemId ?? null,
-          storageKey,
-          filename: input.filename,
-          mime: input.mime,
-          sizeBytes: input.sizeBytes,
-          uploadedBy: me.userId,
-          createdAt: deps.now(),
-        })
-        .returning();
+        const [row] = await tx
+          .insert(schema.attachments)
+          .values({
+            tripId: trip.id,
+            itemId: input.itemId ?? null,
+            storageKey,
+            filename: input.filename,
+            mime: input.mime,
+            sizeBytes: input.sizeBytes,
+            uploadedBy: me.userId,
+            createdAt: deps.now(),
+          })
+          .returning();
         return row;
       });
       if (!a) throw new Error("建立附件失敗");
@@ -156,11 +177,19 @@ export function attachmentRoutes(deps: Deps) {
     if (!generation) {
       const object = await storage.stat(a.storageKey);
       if (!object) throw notFound("檔案");
-      const [pinned] = await db.update(schema.attachments).set({ storageGeneration: object.generation })
-        .where(and(eq(schema.attachments.id, a.id), isNull(schema.attachments.storageGeneration))).returning();
-      generation = pinned?.storageGeneration ?? (await loadAttachment(trip.id, a.id)).storageGeneration;
+      const [pinned] = await db
+        .update(schema.attachments)
+        .set({ storageGeneration: object.generation })
+        .where(and(eq(schema.attachments.id, a.id), isNull(schema.attachments.storageGeneration)))
+        .returning();
+      generation =
+        pinned?.storageGeneration ?? (await loadAttachment(trip.id, a.id)).storageGeneration;
     }
-    const url = await storage.signDownload(a.storageKey, { filename: a.filename, mime: a.mime, generation });
+    const url = await storage.signDownload(a.storageKey, {
+      filename: a.filename,
+      mime: a.mime,
+      generation,
+    });
     return c.json({ url });
   });
 

@@ -204,15 +204,33 @@ export function oauthRoutes(deps: Deps) {
     if (!granted.includes("trips:read")) granted.unshift("trips:read");
     const code = randomToken(32);
     await db.transaction(async (tx) => {
-      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, me.userId)).for("update");
+      const [user] = await tx
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, me.userId))
+        .for("update");
       if (!user || user.deletedAt) throw unauthorized();
-      const [decision] = await tx.update(schema.oauthRequests).set(approve ? {
-        status: "approved", userId: me.userId, grantedScope: granted.join(" "),
-        codeHash: sha256(code), codeExpiresAt: new Date(now().getTime() + CODE_TTL_MS),
-      } : { status: "denied", userId: me.userId }).where(and(
-        eq(schema.oauthRequests.id, req.id), eq(schema.oauthRequests.status, "pending"),
-        gt(schema.oauthRequests.expiresAt, now()),
-      )).returning({ id: schema.oauthRequests.id });
+      const [decision] = await tx
+        .update(schema.oauthRequests)
+        .set(
+          approve
+            ? {
+                status: "approved",
+                userId: me.userId,
+                grantedScope: granted.join(" "),
+                codeHash: sha256(code),
+                codeExpiresAt: new Date(now().getTime() + CODE_TTL_MS),
+              }
+            : { status: "denied", userId: me.userId },
+        )
+        .where(
+          and(
+            eq(schema.oauthRequests.id, req.id),
+            eq(schema.oauthRequests.status, "pending"),
+            gt(schema.oauthRequests.expiresAt, now()),
+          ),
+        )
+        .returning({ id: schema.oauthRequests.id });
       if (!decision) throw conflict("授權請求已處理或過期");
     });
     if (!approve) {

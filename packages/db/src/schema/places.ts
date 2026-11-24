@@ -1,13 +1,4 @@
-import {
-  geometry,
-  index,
-  jsonb,
-  pgTable,
-  smallint,
-  text,
-  unique,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { geometry, index, jsonb, pgTable, smallint, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tstz } from "./columns.js";
 import { savedPlaceCategory } from "./enums.js";
 import { users } from "./users.js";

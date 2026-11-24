@@ -1,6 +1,6 @@
 import { schema } from "@travelog/db";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestApp, type TestApp } from "./helpers.js";
 
 let t: TestApp;
@@ -13,6 +13,10 @@ beforeAll(async () => {
   stranger = await t.login("stranger-sub", "路人");
 });
 afterAll(() => t.close());
+beforeEach(async () => {
+  // Independent scenarios must not consume each other's per-user request budgets.
+  await t.db.delete(schema.rateLimits);
+});
 
 const kyoto = {
   title: "京都・大阪 秋楓之旅",

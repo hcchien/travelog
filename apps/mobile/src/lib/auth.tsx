@@ -1,6 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { assertSession, bindSessionUser, sessionScope } from "./session";
 import { GoogleSignin, isSuccessResponse } from "@react-native-google-signin/google-signin";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -21,6 +20,7 @@ import {
   setSignedOutHandler,
 } from "./api";
 import { unregisterPush } from "./push";
+import { assertSession, bindSessionUser, sessionScope } from "./session";
 import { clearAll, readJson, writeJson } from "./storage";
 import type { Me } from "./types";
 

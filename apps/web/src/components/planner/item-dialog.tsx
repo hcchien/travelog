@@ -295,7 +295,7 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
               </div>
               <span className="truncate text-xs text-muted">{place.address}</span>
             </div>
-            <div className="flex items-center gap-1" role="group" aria-label="地點評分">
+            <fieldset className="flex items-center gap-1" aria-label="地點評分">
               {[1, 2, 3, 4, 5].map((n) => {
                 const cur = savedEntry?.rating ?? null;
                 const active = cur !== null && n <= cur;
@@ -318,7 +318,7 @@ function ItemForm({ trip, item, dayId, onClose, onSaved, canEdit }: Props) {
                   </button>
                 );
               })}
-            </div>
+            </fieldset>
             {place.googleMapsUri && (
               <a
                 href={place.googleMapsUri}

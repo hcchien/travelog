@@ -251,7 +251,7 @@ erDiagram
 | `itinerary_items`                                   | id, trip_id, day_id nullable, type, title, place_id, start_at timestamptz, end_at, tz, sort_key, details jsonb, confirmed_at nullable, confirmed_by, confirm_source (booking/manual), created_by, updated_by, version | `sort_key` 用 fractional indexing 方便拖拉排序；`confirmed_at` 不為 null 即為已確定（釘選），見 §5.5              |
 | `bookings`                                          | id, item_id, kind (flight/lodging/rail/car/ticket/restaurant/other), status (planned/booked/cancelled), confirmation_code, provider, details jsonb                                                                    | 航班可有出發/抵達兩個時區；`status` 變為 `booked` 時自動確定行程點                                                |
 | `wishlist_items`                                    | id, trip_id, place_id, note, added_by, votes                                                                                                                                                                          |                                                                                                                   |
-| `saved_places`                                      | id, user_id, place_id, city_key, city_name, category (food/cafe/sight/shopping/stay/other), tags text[], rating smallint (1..5), private_note, created_at                                                            | unique (user_id, place_id)；見 §5.6                                                                               |
+| `saved_places`                                      | id, user_id, place_id, city_key, city_name, category (food/cafe/sight/shopping/stay/other), tags text[], rating smallint (1..5), private_note, created_at                                                             | unique (user_id, place_id)；見 §5.6                                                                               |
 | `attachments`                                       | id, trip_id, item_id nullable, gcs_key, filename, mime, size, offline (bool)                                                                                                                                          | 訂位憑證、PDF                                                                                                     |
 | `notes`                                             | id, trip_id, author_id, body text, taken_at, location geography nullable, day_id, item_id nullable, merged_into_entry_id nullable                                                                                     | 行中快速筆記                                                                                                      |
 | `journal_entries`                                   | id, trip_id, author_id, scope (trip/day/item), scope_id, body jsonb, body_text text, visibility (members/public), published_at, version                                                                               | body 用 Tiptap/ProseMirror JSON，schema 限定文字節點（不允許 image）；`body_text` 為純文字版本，供搜尋與 MCP 使用 |
@@ -592,16 +592,16 @@ OAuth 授權伺服器端點（同在 `api`）：`/.well-known/oauth-authorizatio
 
 ## 13. 開發里程碑（對應 PRD 版本規劃）
 
-| 里程碑        | 內容                                                                                                                                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 基礎建設   | Monorepo、Terraform（dev ✅）、CI/CD（dev ✅）、Cloud SQL、Passkey + Google + Apple 登入、`/me`                                                               |
-| M1 行程核心   | 行程 CRUD、日程、行程點、訂位狀態與確定（釘選）鎖定、地點搜尋、想去清單、我的地點庫、地圖                                                 |
-| M2 協作       | 成員與角色、邀請連結、樂觀鎖衝突處理                                                                                                      |
+| 里程碑           | 內容                                                                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 基礎建設      | Monorepo、Terraform（dev ✅）、CI/CD（dev ✅）、Cloud SQL、Passkey + Google + Apple 登入、`/me`                                           |
+| M1 行程核心      | 行程 CRUD、日程、行程點、訂位狀態與確定（釘選）鎖定、地點搜尋、想去清單、我的地點庫、地圖                                                 |
+| M2 協作          | 成員與角色、邀請連結、樂觀鎖衝突處理                                                                                                      |
 | M3 文件與心得 ✅ | 附件上傳、文字心得編輯器、行程內搜尋 → **MVP 上線**                                                                                       |
-| M4 行中 ✅    | PWA 離線、今日檢視、快速筆記、SSE 即時同步、活動紀錄                                                                                      |
-| M5 MCP ✅     | `packages/tools`、OAuth 2.1 授權伺服器（DCR、Client ID Metadata Document）、`/mcp` 端點、同意頁與已連線的應用程式、MCP 修改復原、帳號連結 |
-| M6 行後 ✅     | 筆記轉心得、遊記頁、公開分享                                                                                                              |
-| M7 App 🚧      | Expo App、推播、離線同步、App 內刪除帳號                                                                                                  |
+| M4 行中 ✅       | PWA 離線、今日檢視、快速筆記、SSE 即時同步、活動紀錄                                                                                      |
+| M5 MCP ✅        | `packages/tools`、OAuth 2.1 授權伺服器（DCR、Client ID Metadata Document）、`/mcp` 端點、同意頁與已連線的應用程式、MCP 修改復原、帳號連結 |
+| M6 行後 ✅       | 筆記轉心得、遊記頁、公開分享                                                                                                              |
+| M7 App 🚧        | Expo App、推播、離線同步、App 內刪除帳號                                                                                                  |
 
 ---
 

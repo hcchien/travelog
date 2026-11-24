@@ -70,7 +70,14 @@ export function assertAllowedOrigin(c: Context, config: Config) {
 
 /** returnTo 只接受站內相對路徑，避免 open redirect。 */
 export function safeReturnTo(value: string | undefined): string {
-  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u0020\u007f]/.test(value)) {
+  if (
+    !value?.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    [...value].some(
+      (character) => character.charCodeAt(0) <= 0x20 || character.charCodeAt(0) === 0x7f,
+    )
+  ) {
     return "/";
   }
   return value;

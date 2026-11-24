@@ -7,7 +7,8 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { provisionRuntimeRole } from "./lib/runtime-role.js";
 
 const runtimeUrl = process.env.RUNTIME_DATABASE_URL;
-if (process.env.NODE_ENV === "production" && !runtimeUrl) throw new Error("缺少 RUNTIME_DATABASE_URL；拒絕使用共用 DB 身分部署");
+if (process.env.NODE_ENV === "production" && !runtimeUrl)
+  throw new Error("缺少 RUNTIME_DATABASE_URL；拒絕使用共用 DB 身分部署");
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("缺少 DATABASE_URL");
 const { db, sql } = createDb(url, { max: 1, quiet: true });

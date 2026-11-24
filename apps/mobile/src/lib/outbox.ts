@@ -34,7 +34,9 @@ async function save(list: PendingNote[], scope = sessionScope()) {
 export function subscribeOutbox(l: Listener) {
   listeners.add(l);
   const scope = sessionScope();
-  void load(scope).then((list) => { if (sameSession(scope)) l(list); });
+  void load(scope).then((list) => {
+    if (sameSession(scope)) l(list);
+  });
   return () => {
     listeners.delete(l);
   };

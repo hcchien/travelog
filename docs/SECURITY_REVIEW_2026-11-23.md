@@ -14,21 +14,21 @@
 
 ## 發現總表
 
-| ID | 風險 | 問題 | 證據層級 |
-| --- | --- | --- | --- |
-| SEC-01 | 高 | 任意網址 fragment 可替換 Web 登入 session | 來源函式重現＋後端流程追蹤 |
-| SEC-02 | 高 | Google 帳號連結可跨瀏覽器轉交，形成帳號預先劫持 | 靜態完整流程追蹤，有受害者身分前提 |
-| SEC-03 | 高 | CIMD metadata 抓取的 SSRF 防護漏掉 DNS／IPv6 | mocked fetch 重現；實際內網／TLS 未驗證 |
-| SEC-04 | 高 | PATCH 單一日期繞過 60 天上限，造成資源放大 | 範圍判斷與日期產生器局部重現 |
-| SEC-05 | 高 | 匿名端點、付費服務與 MCP 輸入缺少必要資源限制 | 程式／部署設定＋官方公告 |
-| SEC-06 | 高 | 刪除帳號後舊 JWT 仍能寫入，並可建立新的長效授權 | 靜態跨路由追蹤 |
-| SEC-07 | 中 | 撤銷後重新授權，舊 MCP token 的舊 scope 可恢復 | 原查詢方法＋mocked ORM 重現 |
-| SEC-08 | 中 | OAuth 同意頁缺少防嵌入保護 | Web 設定缺口；線上 headers 未驗證 |
-| SEC-09 | 中 | Mobile 換帳號未清 React Query；Web 快取忽略拒絕存取 | 靜態快取生命週期追蹤 |
-| SEC-10 | 中 | 已完成附件仍能被舊 signed PUT URL 覆寫 | adapter／完成流程追蹤；GCS 未實測 |
-| SEC-11 | 中 | 刪除行程不刪 GCS 物件；未完成上傳沒有清理 | 刪除路由與儲存設定追蹤 |
-| SEC-12 | 中 | API 與 migration 共用高權限資料庫使用者 | Terraform 設定；實際 SQL grants 未驗證 |
-| SEC-13 | 中 | Cloud Build 讓 Web／API／migration 共用 service account | Cloud Build 與 Terraform 設定差異 |
+| ID     | 風險 | 問題                                                    | 證據層級                                |
+| ------ | ---- | ------------------------------------------------------- | --------------------------------------- |
+| SEC-01 | 高   | 任意網址 fragment 可替換 Web 登入 session               | 來源函式重現＋後端流程追蹤              |
+| SEC-02 | 高   | Google 帳號連結可跨瀏覽器轉交，形成帳號預先劫持         | 靜態完整流程追蹤，有受害者身分前提      |
+| SEC-03 | 高   | CIMD metadata 抓取的 SSRF 防護漏掉 DNS／IPv6            | mocked fetch 重現；實際內網／TLS 未驗證 |
+| SEC-04 | 高   | PATCH 單一日期繞過 60 天上限，造成資源放大              | 範圍判斷與日期產生器局部重現            |
+| SEC-05 | 高   | 匿名端點、付費服務與 MCP 輸入缺少必要資源限制           | 程式／部署設定＋官方公告                |
+| SEC-06 | 高   | 刪除帳號後舊 JWT 仍能寫入，並可建立新的長效授權         | 靜態跨路由追蹤                          |
+| SEC-07 | 中   | 撤銷後重新授權，舊 MCP token 的舊 scope 可恢復          | 原查詢方法＋mocked ORM 重現             |
+| SEC-08 | 中   | OAuth 同意頁缺少防嵌入保護                              | Web 設定缺口；線上 headers 未驗證       |
+| SEC-09 | 中   | Mobile 換帳號未清 React Query；Web 快取忽略拒絕存取     | 靜態快取生命週期追蹤                    |
+| SEC-10 | 中   | 已完成附件仍能被舊 signed PUT URL 覆寫                  | adapter／完成流程追蹤；GCS 未實測       |
+| SEC-11 | 中   | 刪除行程不刪 GCS 物件；未完成上傳沒有清理               | 刪除路由與儲存設定追蹤                  |
+| SEC-12 | 中   | API 與 migration 共用高權限資料庫使用者                 | Terraform 設定；實際 SQL grants 未驗證  |
+| SEC-13 | 中   | Cloud Build 讓 Web／API／migration 共用 service account | Cloud Build 與 Terraform 設定差異       |
 
 ## 詳細發現與修補驗收
 
@@ -213,14 +213,14 @@ Terraform 為 API、Web 分別建立 service account，但新增的 Cloud Build 
 
 以下是 **特定公告比對，不是完整 SCA 通過**。版本來自 lockfile 的 workspace dependency document；該 lockfile 同時含 package-manager 與 workspace 兩段 YAML，不能只讀第一段就誤判沒有相依套件。
 
-| 套件／鎖定版本 | 已核對公告 | 判斷 |
-| --- | --- | --- |
-| Next 16.4.6 | GHSA-pc58-hwjq-p385；16.4.5 修補 | 高於該公告修補版本 |
-| Next 16.4.6、sharp 0.35.5 | GHSA-2464-fhr4-w9xw；Next 16.4.1／sharp 0.35.5 修補 | 鎖定版本已包含該修補 |
-| Hono 4.13.19 | GHSA-92p4-j3wq-jmqx；4.13.18 修補 | 高於該公告修補版本 |
-| MCP SDK 1.32.2 | GHSA-f897-62hf-6gxq；1.30.1 修補 | 已有該版本的 HTTP body／batch 保護 |
-| MCP SDK 1.32.2 | GHSA-46jr-4wx8-v453；1.32.0 新增 opt-in 保護 | **仍需啟用 maxToolInputElements，見 SEC-05** |
-| Web React 19.3.1、Mobile React 19.3.0 | GHSA-xqc2-xf4c-x3h3 針對 react-server-dom-* | 不能因 Mobile 的 react 19.3.0 就認定有 server RCE；原生 App 不是 RSC server。Next 內嵌 RSC 實際版本仍需檢查建置 artifact |
+| 套件／鎖定版本                        | 已核對公告                                          | 判斷                                                                                                                     |
+| ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Next 16.4.6                           | GHSA-pc58-hwjq-p385；16.4.5 修補                    | 高於該公告修補版本                                                                                                       |
+| Next 16.4.6、sharp 0.35.5             | GHSA-2464-fhr4-w9xw；Next 16.4.1／sharp 0.35.5 修補 | 鎖定版本已包含該修補                                                                                                     |
+| Hono 4.13.19                          | GHSA-92p4-j3wq-jmqx；4.13.18 修補                   | 高於該公告修補版本                                                                                                       |
+| MCP SDK 1.32.2                        | GHSA-f897-62hf-6gxq；1.30.1 修補                    | 已有該版本的 HTTP body／batch 保護                                                                                       |
+| MCP SDK 1.32.2                        | GHSA-46jr-4wx8-v453；1.32.0 新增 opt-in 保護        | **仍需啟用 maxToolInputElements，見 SEC-05**                                                                             |
+| Web React 19.3.1、Mobile React 19.3.0 | GHSA-xqc2-xf4c-x3h3 針對 react-server-dom-*         | 不能因 Mobile 的 react 19.3.0 就認定有 server RCE；原生 App 不是 RSC server。Next 內嵌 RSC 實際版本仍需檢查建置 artifact |
 
 完整 dependency closure、容器 OS 套件、Next 內嵌版本、native iOS／Android 產物都需在可安裝／建置的環境再做 SBOM 與漏洞掃描。
 

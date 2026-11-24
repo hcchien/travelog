@@ -1,5 +1,5 @@
-import { assertSession, invalidateSession, sessionScope } from "./session";
 import * as SecureStore from "expo-secure-store";
+import { assertSession, invalidateSession, sessionScope } from "./session";
 
 export const API_ORIGIN = (process.env.EXPO_PUBLIC_API_ORIGIN ?? "http://localhost:8080").replace(
   /\/$/,
@@ -35,7 +35,10 @@ export const setSignedOutHandler = (fn: () => void) => {
   onSignedOut = fn;
 };
 
-export async function saveSession(tokens: { accessToken: string; refreshToken: string }, scope = sessionScope()) {
+export async function saveSession(
+  tokens: { accessToken: string; refreshToken: string },
+  scope = sessionScope(),
+) {
   assertSession(scope);
   const write = credentialWrites.then(async () => {
     assertSession(scope);
