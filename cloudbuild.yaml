@@ -1,0 +1,208 @@
+# Cloud Build 部署設定（建立 API／Web 映像檔 → 執行 DB migration → 部署 Cloud Run）
+# 手動觸發：
+#   gcloud builds submit --region=asia-east1 --config=cloudbuild.yaml \
+#     --service-account=projects/reviz-500908/serviceAccounts/reviz-cloudbuild@reviz-500908.iam.gserviceaccount.com \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD) --project=reviz-500908 .
+
+steps:
+  - id: build-api
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="${SHORT_SHA:-${_TAG}}"
+        docker pull "${_REGISTRY}/api:latest" || true
+        docker build \
+          -f apps/api/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from="${_REGISTRY}/api:latest" \
+          -t "${_REGISTRY}/api:$${TAG}" \
+          -t "${_REGISTRY}/api:latest" \
+          .
+        docker push --all-tags "${_REGISTRY}/api"
+
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    waitFor: ["-"]
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ -z "${_NEXT_PUBLIC_GOOGLE_MAPS_KEY}" ]; then
+          echo "Missing Maps browser key: set _NEXT_PUBLIC_GOOGLE_MAPS_KEY in the Cloud Build trigger or submission."
+          exit 1
+        fi
+        TAG="${SHORT_SHA:-${_TAG}}"
+        docker pull "${_REGISTRY}/web:latest" || true
+        docker build \
+          -f apps/web/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from="${_REGISTRY}/web:latest" \
+          --build-arg "NEXT_PUBLIC_API_ORIGIN=${_API_ORIGIN}" \
+          --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_KEY=${_NEXT_PUBLIC_GOOGLE_MAPS_KEY}" \
+          --build-arg "NEXT_PUBLIC_GOOGLE_MAP_ID=${_NEXT_PUBLIC_GOOGLE_MAP_ID}" \
+          -t "${_REGISTRY}/web:$${TAG}" \
+          -t "${_REGISTRY}/web:latest" \
+          .
+        docker push --all-tags "${_REGISTRY}/web"
+
+  - id: migrate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor:
+      - build-api
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="${SHORT_SHA:-${_TAG}}"
+        gcloud run jobs deploy "${_PREFIX}-migrate" \
+          --image="${_REGISTRY}/api:$${TAG}" \
+          --region="${_REGION}" \
+          --service-account="${_MIGRATION_SERVICE_ACCOUNT}" \
+          --set-cloudsql-instances="${_CLOUDSQL_INSTANCE}" \
+          --set-secrets="DATABASE_URL=${_PREFIX}-migration-database-url:latest,RUNTIME_DATABASE_URL=${_PREFIX}-database-url:latest" \
+          --command="node" \
+          --args="dist/migrate.js" \
+          --max-retries=0 \
+          --task-timeout=600s \
+          --labels="managed-by=cloudbuild,app=${_PREFIX}-migrate" \
+          --quiet
+        gcloud run jobs execute "${_PREFIX}-migrate" \
+          --region="${_REGION}" \
+          --wait \
+          --quiet
+
+  - id: deploy-maintenance
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor: [migrate]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="${SHORT_SHA:-${_TAG}}"
+        gcloud run jobs deploy "${_PREFIX}-maintenance" \
+          --image="${_REGISTRY}/api:$${TAG}" --region="${_REGION}" \
+          --service-account="${_API_SERVICE_ACCOUNT}" \
+          --set-cloudsql-instances="${_CLOUDSQL_INSTANCE}" \
+          --set-secrets="DATABASE_URL=${_PREFIX}-database-url:latest" \
+          --set-env-vars="GCS_BUCKET=${_GCS_BUCKET}" \
+          --command=node --args=dist/maintain.js --max-retries=2 --task-timeout=600s --quiet
+
+  - id: deploy-api
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor:
+      - migrate
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="${SHORT_SHA:-${_TAG}}"
+        gcloud run deploy "${_PREFIX}-api" \
+          --image="${_REGISTRY}/api:$${TAG}" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --execution-environment=gen2 \
+          --allow-unauthenticated \
+          --service-account="${_API_SERVICE_ACCOUNT}" \
+          --min-instances=0 \
+          --max-instances="${_MAX_INSTANCES}" \
+          --cpu=1 \
+          --memory=512Mi \
+          --concurrency=80 \
+          --timeout=3600s \
+          --port=8080 \
+          --add-cloudsql-instances="${_CLOUDSQL_INSTANCE}" \
+          --set-env-vars="^|^NODE_ENV=production|APP_ORIGIN=${_APP_ORIGIN}|API_ORIGIN=${_API_ORIGIN}|WEBAUTHN_RP_ID=${_WEBAUTHN_RP_ID}|GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}|GOOGLE_NATIVE_CLIENT_IDS=${_GOOGLE_NATIVE_CLIENT_IDS}|STORAGE_DRIVER=gcs|GCS_BUCKET=${_GCS_BUCKET}|MAIL_FROM=${_MAIL_FROM}" \
+          --set-secrets="DATABASE_URL=${_PREFIX}-database-url:latest,COOKIE_SECRET=${_PREFIX}-cookie-secret:latest,JWT_PRIVATE_KEY=${_PREFIX}-jwt-private-key:latest,GOOGLE_CLIENT_SECRET=${_PREFIX}-google-client-secret:latest,RESEND_API_KEY=${_PREFIX}-resend-api-key:latest,GOOGLE_MAPS_SERVER_KEY=${_PREFIX}-maps-server-key:latest" \
+          --labels="managed-by=cloudbuild,app=${_PREFIX}-api" \
+          --quiet
+
+  - id: deploy-web
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor:
+      - build-web
+      - deploy-api
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="${SHORT_SHA:-${_TAG}}"
+        gcloud run deploy "${_PREFIX}-web" \
+          --image="${_REGISTRY}/web:$${TAG}" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --execution-environment=gen2 \
+          --allow-unauthenticated \
+          --service-account="${_WEB_SERVICE_ACCOUNT}" \
+          --min-instances=0 \
+          --max-instances="${_MAX_INSTANCES}" \
+          --cpu=1 \
+          --memory=512Mi \
+          --port=8080 \
+          --set-env-vars="^|^API_INTERNAL_ORIGIN=${_API_ORIGIN}|API_ORIGIN=${_API_ORIGIN}|APP_ORIGIN=${_APP_ORIGIN}" \
+          --labels="managed-by=cloudbuild,app=${_PREFIX}-web" \
+          --quiet
+
+  - id: healthcheck
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor:
+      - deploy-api
+      - deploy-web
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # 注意：Cloud Run 的 *.run.app 對外網址由 Google Frontend 保留 /healthz，改檢查 /.well-known/jwks.json 與 Web /login
+        for i in 1 2 3 4 5; do
+          if curl -fsS "${_API_ORIGIN}/.well-known/jwks.json" >/dev/null && curl -fsSI "${_APP_ORIGIN}/login" >/dev/null; then
+            echo "API & Web 健康檢查通過"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "健康檢查失敗" && exit 1
+
+images:
+  - ${_REGISTRY}/api:latest
+  - ${_REGISTRY}/web:latest
+
+substitutions:
+  _TAG: latest
+  _REGION: asia-east1
+  _PREFIX: travelog-dev
+  _REGISTRY: asia-east1-docker.pkg.dev/reviz-500908/travelog-dev
+  _CLOUDSQL_INSTANCE: elix-498805:asia-east1:elix-dev
+  _GCS_BUCKET: reviz-500908-travelog-dev-attachments
+  _APP_ORIGIN: https://travelog-dev-web-448719938843.asia-east1.run.app
+  _API_ORIGIN: https://travelog-dev-api-448719938843.asia-east1.run.app
+  _WEBAUTHN_RP_ID: travelog-dev-web-448719938843.asia-east1.run.app
+  _GOOGLE_CLIENT_ID: 448719938843-olavo04750hcvs4aag3o0qmui6m5b5mg.apps.googleusercontent.com
+  _GOOGLE_NATIVE_CLIENT_IDS: ""
+  _MAIL_FROM: "Travelog <onboarding@resend.dev>"
+  # Supply the restricted replacement key through the Cloud Build trigger/submission.
+  _NEXT_PUBLIC_GOOGLE_MAPS_KEY: ""
+  _NEXT_PUBLIC_GOOGLE_MAP_ID: DEMO_MAP_ID
+  _MAX_INSTANCES: "3"
+  _API_SERVICE_ACCOUNT: travelog-dev-api@reviz-500908.iam.gserviceaccount.com
+  _WEB_SERVICE_ACCOUNT: travelog-dev-web@reviz-500908.iam.gserviceaccount.com
+  _MIGRATION_SERVICE_ACCOUNT: travelog-dev-migrate@reviz-500908.iam.gserviceaccount.com
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  dynamicSubstitutions: true
+  substitutionOption: ALLOW_LOOSE
+
+timeout: 1800s

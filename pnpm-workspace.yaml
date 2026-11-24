@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  esbuild: true
+
+# drizzle-orm 的選用 peer（expo-sqlite）不需要：避免整套 Expo 被裝進 API 映像檔
+overrides:
+  "drizzle-orm>expo-sqlite": "-"

@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans TC", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Noto Serif TC", ui-serif, serif;
+
+  --color-ink: #18212f;
+  --color-ink-soft: #3f4a5a;
+  --color-muted: #5b6575;
+  --color-line: #e3e6eb;
+  --color-line-strong: #d5dae1;
+  --color-canvas: #f5f6f8;
+  --color-navy: #16263d;
+  --color-brand: #1f5fad;
+  --color-brand-dark: #174a87;
+  --color-brand-soft: #eaf1fa;
+  --color-accent: #e07a2f;
+  --color-pin: #b04c0b;
+  --color-pin-bg: #fff4eb;
+  --color-pin-line: #efb88c;
+  --color-pin-chip: #fbd9bf;
+  --color-pin-ink: #6e2f05;
+  --color-ok: #2f6447;
+  --color-ok-soft: #e5eff8;
+  --color-danger: #b42318;
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(22 38 61 / 0.45);
+}
+
+/* 心得編輯器（Tiptap）內容樣式 */
+.journal-editor > * + * {
+  margin-top: 0.5rem;
+}
+.journal-editor h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+.journal-editor h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.journal-editor ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.journal-editor ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.journal-editor blockquote {
+  border-left: 4px solid var(--color-line-strong);
+  padding-left: 0.75rem;
+  color: var(--color-ink-soft);
+}
+.journal-editor a {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+.journal-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
